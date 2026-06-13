@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+langgraph
+langchain
+openai
+google-generativeai
+pydantic
+python-dotenv
+requests
+tqdm
+numpy
+transformers
+psycopg[binary]
+psycopg_pool
+razorpay
