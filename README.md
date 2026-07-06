@@ -303,17 +303,3 @@ It should not be treated as a substitute for:
 * emergency services
 * formal diagnosis
 * medical treatment decisions
-
----
-
-## Future Improvements
-
-* multi-language support
-* stronger emergency red-flag detection
-* better symptom extraction
-* appointment reminders
-* authentication and user profiles
-* medical record integration
-* improved voice UX
-* mobile app support
-# Healthcare AI Voice Agent - Update
