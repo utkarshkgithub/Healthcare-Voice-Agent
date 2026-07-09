@@ -1,31 +1,54 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Activity, Mail, Lock, User, ArrowRight } from 'lucide-react';
+import { Activity, Mail, Lock, User, ArrowRight, AlertCircle } from 'lucide-react';
 import Background from '../components/Layout/Background';
+import { authApi } from '../utils/api';
 
 export default function Signup() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
+
     if (password !== confirmPassword) {
-      alert('Passwords do not match');
+      setError('Passwords do not match.');
       return;
     }
-    // TODO: API call
-    localStorage.setItem('token', 'dummy-token');
-    navigate('/dashboard');
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const data = await authApi.register(name, email, password);
+      localStorage.setItem('token', data.user_id);
+      localStorage.setItem('user_id', data.user_id);
+      navigate('/voice-agent');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Registration failed';
+      if (msg.includes('400')) {
+        setError('An account with this email already exists.');
+      } else {
+        setError(`Could not reach server: ${msg}`);
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-12">
       <Background />
-      
+
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -35,14 +58,14 @@ export default function Signup() {
         {/* Logo */}
         <div className="flex justify-center mb-8">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-accent to-indigo-600 flex items-center justify-center shadow-lg shadow-accent/30">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#5E6AD2] to-indigo-600 flex items-center justify-center shadow-lg shadow-[#5E6AD2]/30">
               <Activity className="w-7 h-7 text-white" />
             </div>
             <span className="text-2xl font-semibold text-gradient">HealthAI</span>
           </div>
         </div>
 
-        {/* Signup Card */}
+        {/* Card */}
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -51,100 +74,113 @@ export default function Signup() {
         >
           <div className="text-center mb-8">
             <h1 className="text-3xl font-semibold text-gradient mb-2">Create Account</h1>
-            <p className="text-foreground-muted">Join HealthAI for personalized care</p>
+            <p className="text-foreground-muted">Start talking to your AI health assistant</p>
           </div>
+
+          {/* Error banner */}
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-center gap-3 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-sm text-red-300 mb-5"
+            >
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              {error}
+            </motion.div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-foreground mb-2">
-                Full Name
-              </label>
+              <label className="block text-sm font-medium text-foreground mb-2">Full Name</label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-foreground-subtle" />
                 <input
+                  id="signup-name"
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="John Doe"
                   className="input-field w-full pl-11"
                   required
+                  autoComplete="name"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-foreground mb-2">
-                Email Address
-              </label>
+              <label className="block text-sm font-medium text-foreground mb-2">Email Address</label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-foreground-subtle" />
                 <input
+                  id="signup-email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
                   className="input-field w-full pl-11"
                   required
+                  autoComplete="email"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-foreground mb-2">
-                Password
-              </label>
+              <label className="block text-sm font-medium text-foreground mb-2">Password</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-foreground-subtle" />
                 <input
+                  id="signup-password"
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="Min. 6 characters"
                   className="input-field w-full pl-11"
                   required
+                  autoComplete="new-password"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-foreground mb-2">
-                Confirm Password
-              </label>
+              <label className="block text-sm font-medium text-foreground mb-2">Confirm Password</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-foreground-subtle" />
                 <input
+                  id="signup-confirm-password"
                   type="password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="••••••••"
                   className="input-field w-full pl-11"
                   required
+                  autoComplete="new-password"
                 />
               </div>
             </div>
 
             <button
+              id="signup-submit"
               type="submit"
-              className="btn-primary w-full flex items-center justify-center gap-2 group"
+              disabled={loading}
+              className="btn-primary w-full flex items-center justify-center gap-2 group disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Create Account
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              {loading ? 'Creating account…' : 'Create Account'}
+              {!loading && <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />}
             </button>
           </form>
 
           <div className="mt-6 text-center">
             <p className="text-sm text-foreground-muted">
               Already have an account?{' '}
-              <Link to="/login" className="text-accent hover:text-accent-bright transition-colors font-medium">
+              <Link to="/login" className="text-[#5E6AD2] hover:text-[#818cf8] transition-colors font-medium">
                 Sign in
               </Link>
             </p>
           </div>
         </motion.div>
 
-        {/* Footer */}
         <p className="text-center text-sm text-foreground-subtle mt-8">
-          © 2026 HealthAI. Secure healthcare platform.
+          © 2026 HealthAI. AI-powered healthcare triage.
         </p>
       </motion.div>
     </div>

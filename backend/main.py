@@ -24,6 +24,7 @@ from api.appointments import router as appointments_router
 from api.triage import router as triage_router
 from api.chat import router as chat_router
 from api.payments import router as payments_router
+from api.voice import router as voice_router
 
 # ─── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -78,6 +79,7 @@ app.include_router(appointments_router)       # /appointments
 app.include_router(triage_router)             # /run_langgraph
 app.include_router(chat_router)              # /chat — secure LLM proxy
 app.include_router(payments_router)          # /payments
+app.include_router(voice_router)             # /stt, /tts — voice provider endpoints
 
 # ─── Health check ──────────────────────────────────────────────────────────────
 @app.get("/")

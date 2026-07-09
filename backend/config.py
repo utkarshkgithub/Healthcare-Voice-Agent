@@ -28,7 +28,9 @@ class Config:
     GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-    # ─── Speech Provider ────────────────────────────────────────────────────
+    # ─── Speech Provider ──────────────────────────────────────────────────────────────────
+    # Supported: webapi (browser-native) | deepgram
+    VOICE_PROVIDER: str = os.getenv("VOICE_PROVIDER", "webapi")
     DEEPGRAM_API_KEY: str | None = os.getenv("DEEPGRAM_API_KEY")
 
     # ─── Logging ────────────────────────────────────────────────────────────
@@ -52,4 +54,14 @@ class Config:
         if cls.LLM_PROVIDER == "gemini" and not cls.GEMINI_API_KEY:
             raise EnvironmentError(
                 "GEMINI_API_KEY is required when LLM_PROVIDER=gemini."
+            )
+
+        if cls.VOICE_PROVIDER not in {"webapi", "deepgram"}:
+            raise EnvironmentError(
+                "VOICE_PROVIDER must be either 'webapi' or 'deepgram'."
+            )
+
+        if cls.VOICE_PROVIDER == "deepgram" and not cls.DEEPGRAM_API_KEY:
+            raise EnvironmentError(
+                "DEEPGRAM_API_KEY is required when VOICE_PROVIDER=deepgram."
             )
