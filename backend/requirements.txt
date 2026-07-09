@@ -9,7 +9,7 @@ python-dotenv
 requests
 tqdm
 numpy
-transformers
 psycopg[binary]
 psycopg_pool
 razorpay
+python-multipart

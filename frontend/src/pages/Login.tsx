@@ -1,25 +1,44 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Activity, Mail, Lock, ArrowRight } from 'lucide-react';
+import { Activity, Mail, Lock, ArrowRight, AlertCircle } from 'lucide-react';
 import Background from '../components/Layout/Background';
+import { authApi } from '../utils/api';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // TODO: API call
-    localStorage.setItem('token', 'dummy-token');
-    navigate('/dashboard');
+    setError(null);
+    setLoading(true);
+
+    try {
+      const data = await authApi.login(email, password);
+      // Store user_id as the session token (backend returns user_id, not JWT yet)
+      localStorage.setItem('token', data.user_id);
+      localStorage.setItem('user_id', data.user_id);
+      navigate('/voice-agent');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Login failed';
+      if (msg.includes('401')) {
+        setError('Invalid email or password.');
+      } else {
+        setError(`Could not reach server: ${msg}`);
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <Background />
-      
+
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -29,14 +48,14 @@ export default function Login() {
         {/* Logo */}
         <div className="flex justify-center mb-8">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-accent to-indigo-600 flex items-center justify-center shadow-lg shadow-accent/30">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#5E6AD2] to-indigo-600 flex items-center justify-center shadow-lg shadow-[#5E6AD2]/30">
               <Activity className="w-7 h-7 text-white" />
             </div>
             <span className="text-2xl font-semibold text-gradient">HealthAI</span>
           </div>
         </div>
 
-        {/* Login Card */}
+        {/* Card */}
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -45,8 +64,20 @@ export default function Login() {
         >
           <div className="text-center mb-8">
             <h1 className="text-3xl font-semibold text-gradient mb-2">Welcome Back</h1>
-            <p className="text-foreground-muted">Sign in to access your health dashboard</p>
+            <p className="text-foreground-muted">Sign in to access your AI health assistant</p>
           </div>
+
+          {/* Error banner */}
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-center gap-3 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-sm text-red-300 mb-5"
+            >
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              {error}
+            </motion.div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
@@ -56,12 +87,14 @@ export default function Login() {
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-foreground-subtle" />
                 <input
+                  id="login-email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
                   className="input-field w-full pl-11"
                   required
+                  autoComplete="email"
                 />
               </div>
             </div>
@@ -73,48 +106,41 @@ export default function Login() {
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-foreground-subtle" />
                 <input
+                  id="login-password"
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   className="input-field w-full pl-11"
                   required
+                  autoComplete="current-password"
                 />
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-sm">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" className="rounded border-white/10 bg-white/5" />
-                <span className="text-foreground-muted">Remember me</span>
-              </label>
-              <a href="#" className="text-accent hover:text-accent-bright transition-colors">
-                Forgot password?
-              </a>
-            </div>
-
             <button
+              id="login-submit"
               type="submit"
-              className="btn-primary w-full flex items-center justify-center gap-2 group"
+              disabled={loading}
+              className="btn-primary w-full flex items-center justify-center gap-2 group disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Sign In
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              {loading ? 'Signing in…' : 'Sign In'}
+              {!loading && <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />}
             </button>
           </form>
 
           <div className="mt-6 text-center">
             <p className="text-sm text-foreground-muted">
               Don't have an account?{' '}
-              <Link to="/signup" className="text-accent hover:text-accent-bright transition-colors font-medium">
+              <Link to="/signup" className="text-[#5E6AD2] hover:text-[#818cf8] transition-colors font-medium">
                 Sign up
               </Link>
             </p>
           </div>
         </motion.div>
 
-        {/* Footer */}
         <p className="text-center text-sm text-foreground-subtle mt-8">
-          © 2026 HealthAI. Secure healthcare platform.
+          © 2026 HealthAI. AI-powered healthcare triage.
         </p>
       </motion.div>
     </div>

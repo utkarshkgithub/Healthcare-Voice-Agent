@@ -11,7 +11,7 @@ Each node owns only the fields it updates in AgentState.
 """
 from typing import List, TypedDict
 from langgraph.graph import StateGraph, END
-from providers.llm.factory import LLMProviderFactory
+from llm.factory import LLMProviderFactory
 from repositories import doctor_repository
 import logging
 

@@ -11,7 +11,7 @@ This handles the conversational workflow:
 """
 from typing import List, TypedDict
 from langgraph.graph import StateGraph, END
-from providers.llm.factory import LLMProviderFactory
+from llm.factory import LLMProviderFactory
 import logging
 
 logger = logging.getLogger(__name__)

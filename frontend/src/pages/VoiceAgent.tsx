@@ -1,298 +1,314 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, MicOff, Send, History, MessageSquare, Clock, Sparkles } from 'lucide-react';
+import { Volume2, VolumeX, AlertCircle } from 'lucide-react';
 import Navbar from '../components/Layout/Navbar';
 import Background from '../components/Layout/Background';
 
-interface Message {
-  id: number;
-  type: 'user' | 'agent';
-  text: string;
-  timestamp: Date;
-}
+import { VoiceOrb } from '../components/VoiceAgent/VoiceOrb';
+import { MessageList } from '../components/VoiceAgent/MessageList';
+import { ChatInput } from '../components/VoiceAgent/ChatInput';
+import { Message, AgentStatus } from '../types';
+import { voiceProvider } from '../utils/voiceProvider';
 
-interface HistorySession {
-  id: number;
-  date: string;
-  summary: string;
-  messagesCount: number;
-  duration: string;
-}
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+// ─── Component ────────────────────────────────────────────────────────────────
 export default function VoiceAgent() {
-  const [activeTab, setActiveTab] = useState<'chat' | 'history'>('chat');
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 1,
       type: 'agent',
-      text: 'Hello! I\'m your AI health assistant. How can I help you today?',
+      text: "Hello! I'm your AI health assistant. Press the microphone button and describe how you're feeling — I'm here to help.",
       timestamp: new Date(),
     },
   ]);
   const [inputText, setInputText] = useState('');
-  const [isRecording, setIsRecording] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
+  const [status, setStatus] = useState<AgentStatus>('idle');
+  const [interimTranscript, setInterimTranscript] = useState('');
+  const [micPermission, setMicPermission] = useState<'unknown' | 'granted' | 'denied'>('unknown');
+  const [speechSupported] = useState(() => voiceProvider.isSupported());
+  const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [waveformBars] = useState(() => Array.from({ length: 24 }, (_, i) => i));
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const historyRef = useRef<string[]>([]);
+  const nextIdRef = useRef(2);
+  const animFrameRef = useRef<number>(0);
 
-  const historyData: HistorySession[] = [
-    { id: 1, date: '2026-07-05', summary: 'General health checkup discussion', messagesCount: 12, duration: '8 min' },
-    { id: 2, date: '2026-07-03', summary: 'Headache symptoms consultation', messagesCount: 18, duration: '12 min' },
-    { id: 3, date: '2026-07-01', summary: 'Medication reminder setup', messagesCount: 8, duration: '5 min' },
-    { id: 4, date: '2026-06-28', summary: 'Diet and nutrition advice', messagesCount: 15, duration: '10 min' },
-    { id: 5, date: '2026-06-25', summary: 'Sleep pattern analysis', messagesCount: 10, duration: '7 min' },
-  ];
+  // ─── Waveform animation bars heights ─────────────────────────────────────
+  const [barHeights, setBarHeights] = useState<number[]>(waveformBars.map(() => 4));
+  const animateWaveformRef = useRef<() => void>(() => {});
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const animateWaveform = useCallback(() => {
+    setBarHeights(waveformBars.map(() => Math.random() * 32 + 4));
+    animFrameRef.current = requestAnimationFrame(() => {
+      setTimeout(animateWaveformRef.current, 80);
+    });
+  }, [waveformBars]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    animateWaveformRef.current = animateWaveform;
+  }, [animateWaveform]);
 
-  const handleSendMessage = () => {
-    if (!inputText.trim()) return;
+  const stopWaveform = useCallback(() => {
+    cancelAnimationFrame(animFrameRef.current);
+    setBarHeights(waveformBars.map(() => 4));
+  }, [waveformBars]);
 
-    const userMessage: Message = {
-      id: messages.length + 1,
-      type: 'user',
-      text: inputText,
-      timestamp: new Date(),
+  // ─── Scroll to bottom ─────────────────────────────────────────────────────
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, interimTranscript]);
+
+  // ─── Cleanup on unmount ───────────────────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      voiceProvider.stopListening();
+      voiceProvider.cancelSpeech();
+      cancelAnimationFrame(animFrameRef.current);
     };
+  }, []);
 
-    setMessages([...messages, userMessage]);
-    setInputText('');
-    setIsTyping(true);
+  // ─── Speak reply via voiceProvider ───────────────────────────────────────
+  const speakReply = useCallback(
+    (text: string, onDone?: () => void) => {
+      if (!ttsEnabled) {
+        onDone?.();
+        return;
+      }
+      voiceProvider.cancelSpeech();
+      setStatus('speaking');
+      voiceProvider.speak(text, () => {
+        setStatus('idle');
+        onDone?.();
+      });
+    },
+    [ttsEnabled],
+  );
 
-    // Simulate AI response
-    setTimeout(() => {
-      const agentMessage: Message = {
-        id: messages.length + 2,
-        type: 'agent',
-        text: 'I understand your concern. Let me help you with that. Based on your symptoms, I recommend scheduling a consultation with a healthcare provider.',
+  // ─── Send message to real /chat endpoint ─────────────────────────────────
+  const sendMessage = useCallback(
+    async (text: string) => {
+      if (!text.trim()) return;
+      setErrorMsg(null);
+
+      const userMsg: Message = {
+        id: nextIdRef.current++,
+        type: 'user',
+        text: text.trim(),
         timestamp: new Date(),
       };
-      setMessages((prev) => [...prev, agentMessage]);
-      setIsTyping(false);
-    }, 1500);
+      setMessages(prev => [...prev, userMsg]);
+
+      const historySnapshot = [...historyRef.current];
+      historyRef.current = [...historyRef.current, `Patient: ${text.trim()}`];
+
+      setStatus('thinking');
+
+      try {
+        const res = await fetch(`${API_BASE}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text.trim(), history: historySnapshot }),
+        });
+
+        if (!res.ok) {
+          throw new Error(`Server error ${res.status}: ${res.statusText}`);
+        }
+
+        const data = await res.json();
+        const reply: string = data.reply || "I'm sorry, I couldn't generate a response.";
+
+        historyRef.current = [...historyRef.current, `Assistant: ${reply}`];
+        if (historyRef.current.length > 20) {
+          historyRef.current = historyRef.current.slice(-20);
+        }
+
+        const agentMsg: Message = {
+          id: nextIdRef.current++,
+          type: 'agent',
+          text: reply,
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, agentMsg]);
+
+        // Save to localStorage for dashboard history
+        const sessions = JSON.parse(localStorage.getItem('voice_sessions') || '[]');
+        const today = new Date().toISOString().split('T')[0];
+        const existing = sessions.findIndex((s: { date: string }) => s.date === today);
+        if (existing >= 0) {
+          sessions[existing].messageCount += 2;
+          sessions[existing].lastMessage = text.trim();
+        } else {
+          sessions.unshift({ date: today, firstMessage: text.trim(), lastMessage: text.trim(), messageCount: 2 });
+        }
+        localStorage.setItem('voice_sessions', JSON.stringify(sessions.slice(0, 10)));
+
+        speakReply(reply);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Network error';
+        setErrorMsg(`Failed to reach AI: ${msg}`);
+        setStatus('idle');
+      }
+    },
+    [speakReply],
+  );
+
+  // ─── Handle text input submit ─────────────────────────────────────────────
+  const handleTextSend = () => {
+    if (!inputText.trim() || status === 'thinking') return;
+    const text = inputText.trim();
+    setInputText('');
+    sendMessage(text);
   };
 
-  const toggleRecording = () => {
-    setIsRecording(!isRecording);
-    // TODO: Implement actual voice recording
+  // ─── Start voice recording via voiceProvider adapter ─────────────────────
+  const startListening = useCallback(() => {
+    setErrorMsg(null);
+    animateWaveform();
+
+    voiceProvider.startListening(
+      (text, isFinal) => {
+        if (isFinal) {
+          setInterimTranscript('');
+          stopWaveform();
+          sendMessage(text);
+        } else {
+          setInterimTranscript(text);
+        }
+      },
+      statusUpdate => {
+        if (statusUpdate === 'listening') {
+          setStatus('listening');
+          setMicPermission('granted');
+        } else if (statusUpdate === 'error') {
+          setMicPermission('denied');
+          setErrorMsg('Microphone access was denied. Please allow mic access in your browser settings.');
+          stopWaveform();
+          setInterimTranscript('');
+          setStatus('idle');
+        } else {
+          // 'idle'
+          stopWaveform();
+          setInterimTranscript('');
+          setStatus(prev => (prev === 'listening' ? 'idle' : prev));
+        }
+      },
+    );
+  }, [animateWaveform, stopWaveform, sendMessage]);
+
+  // ─── Stop voice recording ─────────────────────────────────────────────────
+  const stopListening = useCallback(() => {
+    voiceProvider.stopListening();
+    stopWaveform();
+    setInterimTranscript('');
+    setStatus('idle');
+  }, [stopWaveform]);
+
+  // ─── Toggle TTS ───────────────────────────────────────────────────────────
+  const toggleTts = () => {
+    if (status === 'speaking') {
+      voiceProvider.cancelSpeech();
+      setStatus('idle');
+    }
+    setTtsEnabled(v => !v);
   };
+
+  // ─── Toggle mic ───────────────────────────────────────────────────────────
+  const toggleMic = () => {
+    if (status === 'listening') {
+      stopListening();
+    } else if (status === 'idle') {
+      startListening();
+    }
+  };
+
+  const isThinking = status === 'thinking';
+  const isSpeaking = status === 'speaking';
+  const isBusy = isThinking || isSpeaking;
 
   return (
     <div className="min-h-screen flex flex-col">
       <Background />
       <Navbar />
-      
-      <div className="flex-1 max-w-7xl w-full mx-auto px-6 py-8">
-        {/* Header with Tabs */}
+
+      <div className="flex-1 max-w-4xl w-full mx-auto px-4 py-6 flex flex-col gap-6">
+        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          className="mb-6"
+          transition={{ duration: 0.5 }}
+          className="flex items-center justify-between"
         >
-          <h1 className="text-4xl font-semibold text-gradient mb-6">AI Health Assistant</h1>
-          
-          <div className="flex gap-2 border-b border-white/[0.06]">
-            <button
-              onClick={() => setActiveTab('chat')}
-              className={`px-6 py-3 text-sm font-medium transition-all duration-200 relative ${
-                activeTab === 'chat'
-                  ? 'text-foreground'
-                  : 'text-foreground-muted hover:text-foreground'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <MessageSquare className="w-4 h-4" />
-                Chat
-              </div>
-              {activeTab === 'chat' && (
-                <motion.div
-                  layoutId="activeTab"
-                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent"
-                  transition={{ type: 'spring', duration: 0.5 }}
-                />
-              )}
-            </button>
-            
-            <button
-              onClick={() => setActiveTab('history')}
-              className={`px-6 py-3 text-sm font-medium transition-all duration-200 relative ${
-                activeTab === 'history'
-                  ? 'text-foreground'
-                  : 'text-foreground-muted hover:text-foreground'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <History className="w-4 h-4" />
-                History
-              </div>
-              {activeTab === 'history' && (
-                <motion.div
-                  layoutId="activeTab"
-                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent"
-                  transition={{ type: 'spring', duration: 0.5 }}
-                />
-              )}
-            </button>
+          <div>
+            <h1 className="text-3xl font-semibold text-gradient">AI Health Assistant</h1>
+            <p className="text-sm text-foreground-muted mt-1">Speak freely — your voice is the interface</p>
           </div>
+          <button
+            onClick={toggleTts}
+            title={ttsEnabled ? 'Mute AI voice' : 'Unmute AI voice'}
+            className="p-2 rounded-lg bg-white/[0.05] border border-white/[0.08] text-foreground-muted hover:text-foreground hover:bg-white/[0.08] transition-all duration-200"
+          >
+            {ttsEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+          </button>
         </motion.div>
 
-        {/* Content Area */}
-        <AnimatePresence mode="wait">
-          {activeTab === 'chat' ? (
-            <motion.div
-              key="chat"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              transition={{ duration: 0.3 }}
-              className="card-glass rounded-2xl overflow-hidden flex flex-col"
-              style={{ height: 'calc(100vh - 280px)' }}
-            >
-              {/* Messages Area */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                {messages.map((message) => (
-                  <motion.div
-                    key={message.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3 }}
-                    className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div
-                      className={`max-w-[70%] rounded-2xl px-5 py-3 ${
-                        message.type === 'user'
-                          ? 'bg-accent text-white'
-                          : 'bg-white/[0.08] text-foreground border border-white/[0.06]'
-                      }`}
-                    >
-                      {message.type === 'agent' && (
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-accent to-purple-600 flex items-center justify-center">
-                            <Sparkles className="w-3 h-3 text-white" />
-                          </div>
-                          <span className="text-xs text-foreground-muted font-medium">AI Assistant</span>
-                        </div>
-                      )}
-                      <p className="text-sm leading-relaxed">{message.text}</p>
-                      <p className={`text-xs mt-2 ${
-                        message.type === 'user' ? 'text-white/70' : 'text-foreground-subtle'
-                      }`}>
-                        {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    </div>
-                  </motion.div>
-                ))}
-                
-                {isTyping && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="flex justify-start"
-                  >
-                    <div className="bg-white/[0.08] rounded-2xl px-5 py-3 border border-white/[0.06]">
-                      <div className="flex gap-2">
-                        <div className="w-2 h-2 rounded-full bg-foreground-muted animate-bounce" style={{ animationDelay: '0ms' }} />
-                        <div className="w-2 h-2 rounded-full bg-foreground-muted animate-bounce" style={{ animationDelay: '150ms' }} />
-                        <div className="w-2 h-2 rounded-full bg-foreground-muted animate-bounce" style={{ animationDelay: '300ms' }} />
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-                
-                <div ref={messagesEndRef} />
-              </div>
+        {/* Warnings & Errors */}
+        {!speechSupported && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 text-sm text-amber-300"
+          >
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            Voice input requires Chrome or Edge. You can still type below.
+          </motion.div>
+        )}
 
-              {/* Input Area */}
-              <div className="border-t border-white/[0.06] p-4 bg-white/[0.02]">
-                <div className="flex items-end gap-3">
-                  <button
-                    onClick={toggleRecording}
-                    className={`p-3 rounded-xl transition-all duration-300 ${
-                      isRecording
-                        ? 'bg-red-500 text-white shadow-lg shadow-red-500/30 animate-pulse'
-                        : 'bg-white/[0.05] hover:bg-white/[0.08] text-foreground-muted border border-white/[0.06]'
-                    }`}
-                  >
-                    {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-                  </button>
-                  
-                  <div className="flex-1 relative">
-                    <input
-                      type="text"
-                      value={inputText}
-                      onChange={(e) => setInputText(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                      placeholder="Type your message or use voice..."
-                      className="input-field w-full pr-12"
-                    />
-                    <button
-                      onClick={handleSendMessage}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg bg-accent hover:bg-accent-bright 
-                               text-white transition-all duration-200 disabled:opacity-50"
-                      disabled={!inputText.trim()}
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-                <p className="text-xs text-foreground-subtle mt-2 text-center">
-                  AI responses are for informational purposes only. Consult a healthcare professional for medical advice.
-                </p>
-              </div>
-            </motion.div>
-          ) : (
+        {micPermission === 'denied' && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex items-center gap-3 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-sm text-red-300"
+          >
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            Microphone access denied. Go to browser Settings → Site Settings → allow microphone for this page.
+          </motion.div>
+        )}
+
+        <AnimatePresence>
+          {errorMsg && (
             <motion.div
-              key="history"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.3 }}
-              className="card-glass rounded-2xl p-6"
-              style={{ height: 'calc(100vh - 280px)' }}
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="flex items-center gap-3 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-sm text-red-300"
             >
-              <div className="overflow-y-auto h-full space-y-3">
-                {historyData.map((session, index) => (
-                  <motion.div
-                    key={session.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3, delay: index * 0.05 }}
-                    className="bg-white/[0.02] hover:bg-white/[0.05] rounded-xl p-5 border border-white/[0.06] 
-                             hover:border-white/[0.1] transition-all duration-200 cursor-pointer group"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <h3 className="text-foreground font-medium group-hover:text-accent transition-colors">
-                          {session.summary}
-                        </h3>
-                        <div className="flex items-center gap-4 mt-2 text-sm text-foreground-muted">
-                          <div className="flex items-center gap-1">
-                            <Clock className="w-4 h-4" />
-                            <span>{session.date}</span>
-                          </div>
-                          <span>•</span>
-                          <span>{session.messagesCount} messages</span>
-                          <span>•</span>
-                          <span>{session.duration}</span>
-                        </div>
-                      </div>
-                      <div className="w-8 h-8 rounded-lg bg-accent/10 border border-accent/30 flex items-center justify-center
-                                    group-hover:bg-accent/20 transition-colors">
-                        <MessageSquare className="w-4 h-4 text-accent" />
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              {errorMsg}
             </motion.div>
           )}
         </AnimatePresence>
+
+        <VoiceOrb
+          status={status}
+          speechSupported={speechSupported}
+          toggleMic={toggleMic}
+          waveformBars={waveformBars}
+          barHeights={barHeights}
+          interimTranscript={interimTranscript}
+        />
+
+        <div className="card-glass rounded-2xl flex flex-col overflow-hidden flex-1 min-h-0" style={{ maxHeight: '420px' }}>
+          <MessageList messages={messages} status={status} messagesEndRef={messagesEndRef} />
+          <ChatInput
+            inputText={inputText}
+            setInputText={setInputText}
+            handleTextSend={handleTextSend}
+            isBusy={isBusy}
+          />
+        </div>
       </div>
     </div>
   );
