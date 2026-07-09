@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Volume2, VolumeX, AlertCircle } from 'lucide-react';
 import Navbar from '../components/Layout/Navbar';
-import Background from '../components/Layout/Background';
+import DarkVeil from '../components/Layout/DarkVeil';
 
 import { VoiceOrb } from '../components/VoiceAgent/VoiceOrb';
 import { MessageList } from '../components/VoiceAgent/MessageList';
@@ -230,7 +230,16 @@ export default function VoiceAgent() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Background />
+      <div className="fixed inset-0 z-[-1] bg-black">
+        <DarkVeil
+          hueShift={0}
+          noiseIntensity={0}
+          scanlineIntensity={0}
+          speed={0.5}
+          scanlineFrequency={0}
+          warpAmount={0}
+        />
+      </div>
       <Navbar />
 
       <div className="flex-1 max-w-4xl w-full mx-auto px-4 py-6 flex flex-col gap-6">

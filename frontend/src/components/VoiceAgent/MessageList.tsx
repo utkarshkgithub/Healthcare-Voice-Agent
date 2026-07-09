@@ -31,7 +31,7 @@ export function MessageList({ messages, status, messagesEndRef }: MessageListPro
           >
             {message.type === 'agent' && (
               <div className="flex items-center gap-2 mb-1.5">
-                <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#5E6AD2] to-purple-600 flex items-center justify-center">
+                <div className="w-5 h-5 rounded-full bg-black flex items-center justify-center">
                   <Sparkles className="w-2.5 h-2.5 text-white" />
                 </div>
                 <span className="text-xs text-foreground-muted font-medium">AI Assistant</span>

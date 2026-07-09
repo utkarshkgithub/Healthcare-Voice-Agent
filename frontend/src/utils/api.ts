@@ -33,23 +33,34 @@ async function apiFetch<T>(
 export const authApi = {
   /**
    * POST /auth/login
-   * Returns { message, user_id }
+   * Returns { message, user_id, name, email }
    */
   login: (email: string, password: string) =>
-    apiFetch<{ message: string; user_id: string }>('POST', '/auth/login', { email, password }),
+    apiFetch<{ message: string; user_id: string; name?: string; email?: string }>('POST', '/auth/login', { email, password }),
 
   /**
    * POST /auth/register
-   * Returns { message, user_id }
+   * Returns { message, user_id, name, email }
    */
   register: (name: string, email: string, password: string) =>
-    apiFetch<{ message: string; user_id: string }>('POST', '/auth/register', { name, email, password }),
+    apiFetch<{ message: string; user_id: string; name?: string; email?: string }>('POST', '/auth/register', { name, email, password }),
+
+  /**
+   * GET /auth/me/{userId}
+   * Returns { email, name }
+   */
+  getMe: (userId: string) =>
+    apiFetch<{ email: string; name: string }>('GET', `/auth/me/${userId}`),
 
   logout: () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user_id');
+    localStorage.removeItem('user_name');
+    localStorage.removeItem('user_email');
+    localStorage.removeItem('voice_sessions');
   },
 };
+
 
 // ─── Chat (LangGraph voice agent) ─────────────────────────────────────────────
 export const chatApi = {

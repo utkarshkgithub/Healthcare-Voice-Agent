@@ -40,3 +40,28 @@ def register_user(name: str, email: str, password: str) -> int | None:
     except Exception as e:
         logger.error(f"[auth_repository] DB error during registration: {e}")
         raise
+
+def get_user_info(user_id: int) -> dict | None:
+    """
+    Retrieve user email and patient name by user_id.
+    """
+    try:
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT u.email, p.name 
+                    FROM users u 
+                    LEFT JOIN patients p ON p.user_id = u.id 
+                    WHERE u.id = %s
+                    """,
+                    (user_id,),
+                )
+                row = cur.fetchone()
+                if row:
+                    return {"email": row[0], "name": row[1] or "Patient User"}
+                return None
+    except Exception as e:
+        logger.error(f"[auth_repository] DB error during get_user_info: {e}")
+        raise
+
