@@ -5,12 +5,12 @@ Configuration is loaded from environment variables only.
 import os
 from pathlib import Path
 import google.generativeai as genai
-from providers.llm.base import LLMProvider
+from llm.base import LLMProvider
 import logging
 
 logger = logging.getLogger(__name__)
 
-PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
+PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 
 def _load_prompt(name: str) -> str:
