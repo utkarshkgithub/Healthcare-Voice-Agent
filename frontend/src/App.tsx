@@ -1,12 +1,9 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import Login from './pages/Login';
-import Signup from './pages/Signup';
-import Dashboard from './pages/Dashboard';
-import VoiceAgent from './pages/VoiceAgent';
+import { Login, Signup, Dashboard, VoiceAgent } from './pages';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('token');
-  return token ? <>{children}</> : <Navigate to="/login" />;
+  return token ? <>{children}</> : <Navigate to="/login" replace />;
 }
 
 function App() {
@@ -17,11 +14,7 @@ function App() {
         <Route path="/signup" element={<Signup />} />
         <Route
           path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <Dashboard />
-            </ProtectedRoute>
-          }
+          element={<Dashboard />}
         />
         <Route
           path="/voice-agent"
@@ -31,7 +24,7 @@ function App() {
             </ProtectedRoute>
           }
         />
-        <Route path="/" element={<Navigate to="/voice-agent" />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Router>
   );
