@@ -10,4 +10,5 @@
 
 export { default as Background } from './Layout/Background';
 export { default as Navbar } from './Layout/Navbar';
+export { default as Logo } from './Layout/Logo';
 export { default as Showcase } from './Showcase';

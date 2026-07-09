@@ -1,17 +1,42 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Activity, LayoutDashboard, MessageSquare, LogOut, User } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, LogOut, User } from 'lucide-react';
+import { authApi } from '../../utils/api';
+import Logo from './Logo';
 
 export default function Navbar() {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [userName, setUserName] = useState(() => localStorage.getItem('user_name') || 'Patient User');
+  const [userEmail, setUserEmail] = useState(() => localStorage.getItem('user_email') || 'patient@healthai.com');
   const navigate = useNavigate();
   const location = useLocation();
 
+  useEffect(() => {
+    const userId = localStorage.getItem('user_id');
+    if (userId) {
+      authApi.getMe(userId)
+        .then((data) => {
+          if (data.name) {
+            setUserName(data.name);
+            localStorage.setItem('user_name', data.name);
+          }
+          if (data.email) {
+            setUserEmail(data.email);
+            localStorage.setItem('user_email', data.email);
+          }
+        })
+        .catch((err) => {
+          console.error('Failed to fetch profile details:', err);
+        });
+    }
+  }, []);
+
   const handleLogout = () => {
-    localStorage.removeItem('token');
+    authApi.logout();
     navigate('/login');
   };
+
 
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -25,12 +50,7 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-6 py-4">
         <div className="flex items-center justify-between">
           {/* Logo */}
-          <Link to="/dashboard" className="flex items-center gap-2 group">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-accent to-indigo-600 flex items-center justify-center shadow-lg shadow-accent/20">
-              <Activity className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-xl font-semibold text-gradient">HealthAI</span>
-          </Link>
+          <Logo size="md" linkTo="/dashboard" />
 
           {/* Nav Links */}
           <div className="flex items-center gap-2">
@@ -66,52 +86,68 @@ export default function Navbar() {
             })}
           </div>
 
-          {/* Profile Menu */}
-          <div className="relative">
-            <button
-              onClick={() => setShowProfileMenu(!showProfileMenu)}
-              className="w-10 h-10 rounded-full bg-gradient-to-br from-accent/50 to-purple-600/50 border border-white/[0.1] 
-                       flex items-center justify-center hover:scale-105 transition-transform duration-200
-                       shadow-lg shadow-accent/10"
-            >
-              <User className="w-5 h-5 text-white" />
-            </button>
-
-            <AnimatePresence>
-              {showProfileMenu && (
-                <>
-                  {/* Backdrop */}
-                  <div 
-                    className="fixed inset-0 z-40" 
-                    onClick={() => setShowProfileMenu(false)}
-                  />
-                  
-                  {/* Menu */}
-                  <motion.div
-                    initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute right-0 mt-2 w-48 card-glass rounded-xl shadow-2xl overflow-hidden z-50"
-                  >
-                    <div className="p-3 border-b border-white/[0.06]">
-                      <p className="text-sm font-medium text-foreground">Patient User</p>
-                      <p className="text-xs text-foreground-muted mt-0.5">patient@healthai.com</p>
-                    </div>
+          {/* Profile or Login */}
+          {localStorage.getItem('token') ? (
+            <div className="relative">
+              <button
+                onClick={() => setShowProfileMenu(!showProfileMenu)}
+                className="
+    flex h-10 w-10 items-center justify-center
+    rounded-full
+    border border-white/10
+    bg-accent
+    shadow-lg shadow-accent/20
+    transition-all duration-200
+    hover:scale-105
+  "
+              >
+                <User className="w-5 h-5 text-white" />
+              </button>
+  
+              <AnimatePresence>
+                {showProfileMenu && (
+                  <>
+                    {/* Backdrop */}
+                    <div 
+                      className="fixed inset-0 z-40" 
+                      onClick={() => setShowProfileMenu(false)}
+                    />
                     
-                    <button
-                      onClick={handleLogout}
-                      className="w-full px-3 py-2 text-left text-sm text-foreground-muted hover:text-foreground 
-                               hover:bg-white/[0.05] transition-colors duration-150 flex items-center gap-2"
+                    {/* Menu */}
+                    <motion.div
+                      initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute right-0 mt-2 w-48 card-glass rounded-xl shadow-2xl overflow-hidden z-50"
                     >
-                      <LogOut className="w-4 h-4" />
-                      Logout
-                    </button>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-          </div>
+                      <div className="p-3 border-b border-white/[0.06]">
+                        <p className="text-sm font-medium text-foreground">{userEmail}</p>
+                      </div>
+                      
+                      <button
+                        onClick={handleLogout}
+                        className="w-full px-3 py-2 text-left text-sm text-foreground-muted hover:text-foreground 
+                                 hover:bg-white/[0.05] transition-colors duration-150 flex items-center gap-2"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        Logout
+                      </button>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
+          ) : (
+            <div className="flex items-center gap-4">
+              <Link to="/login" className="text-sm font-medium text-foreground hover:text-white transition-colors">
+                Log in
+              </Link>
+              <Link to="/signup" className="text-sm font-medium bg-white text-black px-4 py-2 rounded-full hover:bg-neutral-200 transition-colors">
+                Sign up
+              </Link>
+            </div>
+          )}
         </div>
       </div>
     </nav>

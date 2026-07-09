@@ -28,7 +28,16 @@ def login(request: LoginRequest):
         raise HTTPException(status_code=500, detail="Login failed")
 
     if user_id:
-        return JSONResponse(content={"message": "Login successful", "user_id": user_id})
+        user_info = auth_repository.get_user_info(user_id)
+        name = user_info["name"] if user_info else "Patient User"
+        return JSONResponse(
+            content={
+                "message": "Login successful",
+                "user_id": user_id,
+                "name": name,
+                "email": request.email,
+            }
+        )
     raise HTTPException(status_code=401, detail="Invalid credentials")
 
 
@@ -46,6 +55,21 @@ def register(request: RegisterRequest):
     if user_id:
         return JSONResponse(
             status_code=201,
-            content={"message": "Registration successful", "user_id": user_id},
+            content={
+                "message": "Registration successful",
+                "user_id": user_id,
+                "name": request.name,
+                "email": request.email,
+            },
         )
     raise HTTPException(status_code=400, detail="Registration failed")
+
+
+@router.get("/me/{user_id}")
+def get_me(user_id: int):
+    logger.info(f"[auth] Get me for user_id={user_id}")
+    user_info = auth_repository.get_user_info(user_id)
+    if not user_info:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user_info
+

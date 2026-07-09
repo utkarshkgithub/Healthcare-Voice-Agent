@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Activity, Mail, Lock, User, ArrowRight, AlertCircle } from 'lucide-react';
-import Background from '../components/Layout/Background';
+import { Mail, Lock, User, ArrowRight, AlertCircle } from 'lucide-react';
+import { Background, Logo } from '../components';
 import { authApi } from '../utils/api';
 
 export default function Signup() {
@@ -32,6 +32,8 @@ export default function Signup() {
       const data = await authApi.register(name, email, password);
       localStorage.setItem('token', data.user_id);
       localStorage.setItem('user_id', data.user_id);
+      if (data.name || name) localStorage.setItem('user_name', data.name || name);
+      if (data.email || email) localStorage.setItem('user_email', data.email || email);
       navigate('/voice-agent');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Registration failed';
@@ -57,12 +59,7 @@ export default function Signup() {
       >
         {/* Logo */}
         <div className="flex justify-center mb-8">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#5E6AD2] to-indigo-600 flex items-center justify-center shadow-lg shadow-[#5E6AD2]/30">
-              <Activity className="w-7 h-7 text-white" />
-            </div>
-            <span className="text-2xl font-semibold text-gradient">HealthAI</span>
-          </div>
+          <Logo size="lg" />
         </div>
 
         {/* Card */}

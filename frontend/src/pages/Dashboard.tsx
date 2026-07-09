@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Mic, MessageSquare, Clock, ChevronRight, Activity, Zap, Shield } from 'lucide-react';
 import Navbar from '../components/Layout/Navbar';
-import Background from '../components/Layout/Background';
+import DarkVeil from '../components/Layout/DarkVeil';
+import SpotlightCard from '../components/Layout/SpotlightCard';
 
 interface StoredSession {
   date: string;
@@ -27,15 +28,15 @@ export default function Dashboard() {
     {
       icon: Mic,
       step: '01',
-      title: 'Speak Freely',
-      desc: 'Click the mic and describe your symptoms or health concern in natural language.',
-      color: 'from-[#5E6AD2] to-indigo-500',
+      title: 'Share Your Symptoms',
+      desc: 'Simply speak into your microphone to describe what you are feeling — no typing required.',
+      color: 'from-blue-500 to-indigo-500',
     },
     {
       icon: Zap,
       step: '02',
-      title: 'AI Triages',
-      desc: 'The AI analyses your symptoms, flags emergencies instantly, and asks targeted follow-up questions.',
+      title: 'Instant AI Analysis',
+      desc: 'Our advanced AI instantly analyzes your voice and cross-references medical databases.',
       color: 'from-purple-500 to-pink-500',
     },
     {
@@ -49,7 +50,16 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen">
-      <Background />
+      <div className="fixed inset-0 z-[-1] bg-black">
+        <DarkVeil
+          hueShift={0}
+          noiseIntensity={0}
+          scanlineIntensity={0}
+          speed={0.5}
+          scanlineFrequency={0}
+          warpAmount={0}
+        />
+      </div>
       <Navbar />
 
       <div className="max-w-5xl mx-auto px-6 py-10 space-y-12">
@@ -73,20 +83,32 @@ export default function Dashboard() {
           </p>
 
           <motion.button
-            id="start-voice-session"
-            onClick={() => navigate('/voice-agent')}
-            whileHover={{ scale: 1.04 }}
-            whileTap={{ scale: 0.97 }}
-            className="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-[#5E6AD2] text-white font-semibold text-lg
-                       shadow-[0_0_0_1px_rgba(94,106,210,0.5),0_8px_32px_rgba(94,106,210,0.35)] 
-                       hover:bg-[#6872D9] transition-all duration-300"
-          >
-            <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
-              <Mic className="w-4 h-4" />
-            </div>
-            Start Voice Session
-            <ChevronRight className="w-5 h-5" />
-          </motion.button>
+  id="start-voice-session"
+  onClick={() => navigate("/voice-agent")}
+  whileHover={{ scale: 1.03, y: -2 }}
+  whileTap={{ scale: 0.98 }}
+  className="
+    inline-flex items-center gap-4
+    rounded-2xl
+    bg-white
+    px-8 py-4
+    text-black
+    font-semibold text-lg
+    shadow-lg
+    transition-all duration-300
+    hover:bg-neutral-100
+    hover:shadow-[0_12px_40px_rgba(255,255,255,0.18)]
+    active:bg-neutral-200
+  "
+>
+  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-100">
+    <Mic className="h-5 w-5 text-black" />
+  </div>
+
+  <span>Start Voice Session</span>
+
+  <ChevronRight className="h-5 w-5 text-neutral-700" />
+</motion.button>
         </motion.div>
 
         {/* How it works */}
@@ -100,23 +122,28 @@ export default function Dashboard() {
             {howItWorks.map((item, i) => {
               const Icon = item.icon;
               return (
-                <motion.div
-                  key={item.step}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.4, delay: 0.2 + i * 0.1 }}
-                  className="card-glass rounded-2xl p-6 space-y-4"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${item.color} flex items-center justify-center shadow-lg`}>
-                      <Icon className="w-5 h-5 text-white" />
-                    </div>
-                    <span className="text-foreground-subtle text-xs font-mono">{item.step}</span>
-                  </div>
-                  <h3 className="text-foreground font-semibold">{item.title}</h3>
-                  <p className="text-foreground-muted text-sm leading-relaxed">{item.desc}</p>
-                </motion.div>
-              );
+  <motion.div
+    key={item.step}
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ duration: 0.4, delay: 0.2 + i * 0.1 }}
+    className="h-full"
+  >
+    <SpotlightCard className="h-full">
+      <div className="relative z-10 flex flex-col h-full space-y-4">
+
+
+        <h3 className="text-foreground font-semibold underline">
+          {item.title}
+        </h3>
+
+        <p className="text-foreground-muted text-sm leading-relaxed">
+          {item.desc}
+        </p>
+      </div>
+    </SpotlightCard>
+  </motion.div>
+);
             })}
           </div>
         </motion.div>
