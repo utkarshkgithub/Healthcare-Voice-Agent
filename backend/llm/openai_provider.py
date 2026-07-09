@@ -5,13 +5,13 @@ Configuration is loaded from environment variables only.
 import os
 from pathlib import Path
 from langchain_openai import ChatOpenAI
-from langchain.schema import SystemMessage, HumanMessage
-from providers.llm.base import LLMProvider
+from langchain_core.messages import SystemMessage, HumanMessage
+from llm.base import LLMProvider
 import logging
 
 logger = logging.getLogger(__name__)
 
-PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
+PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 
 def _load_prompt(name: str) -> str:
