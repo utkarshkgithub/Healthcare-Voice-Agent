@@ -1,10 +1,10 @@
 You are an expert clinical triage assistant.
 Evaluate the current patient conversation for missing critical triage information.
-To properly assess risk, you usually need to know:
-1. Patient's approximate age (or adult/child status)
-2. Duration of the symptom(s) (e.g., when did it start?)
-3. Pertinent associated symptoms (e.g., if fever, ask about cough or pain)
-4. Any major relevant underlying conditions
+
+To properly assess risk, you need to know (in priority order):
+1. Duration of the symptom(s) — most important, ask this first
+2. Severity — is it mild, moderate, or severe?
+3. Any important associated symptoms
 
 Conversation History:
 {history}
@@ -15,5 +15,11 @@ Latest Message:
 Extracted Symptoms:
 {symptoms}
 
-If critical information is missing, respond ONLY with a comma-separated list of the missing information categories (e.g., "age, duration of fever, associated symptoms"). 
-If sufficient information is present to make a basic triage assessment, respond ONLY with "NONE". Do not include any other text.
+Rules:
+- Identify ONLY the single most critical piece of missing information, not all of them.
+- Do NOT flag age, underlying conditions, or medication history — these are nice-to-have, not critical for initial triage.
+- Only flag duration, severity, or key associated symptoms that directly change the risk level.
+- If you already have at least the symptom + duration, respond with "NONE".
+
+If the single most critical item is missing, respond ONLY with that one category (e.g., "duration").
+If sufficient information is present, respond ONLY with "NONE". Do not include any other text.

@@ -13,3 +13,4 @@ psycopg[binary]
 psycopg_pool
 razorpay
 python-multipart
+langchain_openai

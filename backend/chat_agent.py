@@ -7,8 +7,11 @@ This handles the conversational workflow:
 - Determine missing information
 - Ask targeted questions
 - Assess risk
+- Predict the likely condition, related symptoms, and immediate remedy
 - Provide general guidance and safety-net advice
 """
+import json
+import re
 from typing import List, TypedDict
 from langgraph.graph import StateGraph, END
 from llm.factory import LLMProviderFactory
@@ -25,7 +28,30 @@ class ChatAgentState(TypedDict):
     is_emergency: bool
     missing_info: str
     risk_assessment: str
+    predicted_condition: str
+    predicted_additional_symptoms: List[str]
+    immediate_remedy: str
+    prediction_summary: str
     final_reply: str
+    question_rounds: int
+
+
+def _parse_prediction_payload(raw: str) -> dict:
+    text = raw.strip()
+    fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.S | re.I)
+    if fenced:
+        text = fenced.group(1).strip()
+    else:
+        object_match = re.search(r"\{.*\}", text, re.S)
+        if object_match:
+            text = object_match.group(0).strip()
+
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError:
+        logger.warning("[chat_agent] Prediction payload was not valid JSON")
+        return {}
 
 # ─── Node implementations ───────────────────────────────────────────────────────
 
@@ -96,7 +122,7 @@ def ask_questions_node(state: ChatAgentState) -> dict:
         missing_info=state.get("missing_info", "")
     )
     
-    return {"final_reply": reply}
+    return {"final_reply": reply, "question_rounds": state.get("question_rounds", 0) + 1}
 
 
 def risk_assessment_node(state: ChatAgentState) -> dict:
@@ -115,6 +141,55 @@ def risk_assessment_node(state: ChatAgentState) -> dict:
     return {"risk_assessment": assessment}
 
 
+def generate_prediction_node(state: ChatAgentState) -> dict:
+    logger.info("[chat_agent] Generating symptom-based prediction")
+    llm = LLMProviderFactory.create()
+    history_str = "\n".join(state.get("history", []))
+
+    raw_prediction = llm.call_prompt(
+        "chat_prediction",
+        history=history_str,
+        message=state["message"],
+        symptoms=state.get("symptoms", ""),
+        risk_assessment=state.get("risk_assessment", ""),
+    )
+
+    payload = _parse_prediction_payload(raw_prediction)
+    predicted_condition = str(
+        payload.get("predicted_condition")
+        or payload.get("likely_condition")
+        or payload.get("condition")
+        or "Unclear"
+    ).strip()
+
+    additional_symptoms = payload.get("predicted_additional_symptoms")
+    if additional_symptoms is None:
+        additional_symptoms = payload.get("additional_symptoms")
+    if isinstance(additional_symptoms, str):
+        additional_symptoms = [part.strip() for part in additional_symptoms.split(",") if part.strip()]
+    elif not isinstance(additional_symptoms, list):
+        additional_symptoms = []
+
+    normalized_additional_symptoms = [str(item).strip() for item in additional_symptoms if str(item).strip()]
+    immediate_remedy = str(payload.get("immediate_remedy") or payload.get("remedy") or "").strip()
+
+    summary_parts = [f"Likely condition: {predicted_condition}."]
+    if normalized_additional_symptoms:
+        summary_parts.append(f"Additional symptoms: {', '.join(normalized_additional_symptoms)}.")
+    if immediate_remedy:
+        summary_parts.append(f"Immediate remedy: {immediate_remedy}.")
+
+    prediction_summary = " ".join(summary_parts).strip()
+    logger.info(f"[chat_agent] Prediction summary: {prediction_summary}")
+
+    return {
+        "predicted_condition": predicted_condition,
+        "predicted_additional_symptoms": normalized_additional_symptoms,
+        "immediate_remedy": immediate_remedy,
+        "prediction_summary": prediction_summary,
+    }
+
+
 def provide_guidance_node(state: ChatAgentState) -> dict:
     logger.info("[chat_agent] Providing guidance and safety net")
     llm = LLMProviderFactory.create()
@@ -124,7 +199,8 @@ def provide_guidance_node(state: ChatAgentState) -> dict:
         "chat_guidance", 
         history=history_str, 
         message=state["message"],
-        risk_assessment=state.get("risk_assessment", "")
+        risk_assessment=state.get("risk_assessment", ""),
+        prediction_summary=state.get("prediction_summary", "")
     )
     
     return {"final_reply": reply}
@@ -141,6 +217,8 @@ def route_after_missing_info_check(state: ChatAgentState) -> str:
     missing = state.get("missing_info", "").upper()
     if "NONE" in missing or not missing.strip():
         return "continue"
+    if state.get("question_rounds", 0) >= 1:
+        return "continue"
     return "ask_questions"
 
 
@@ -156,6 +234,7 @@ def build_chat_graph():
     builder.add_node("check_missing_info_node", check_missing_info_node)
     builder.add_node("ask_questions_node", ask_questions_node)
     builder.add_node("risk_assessment_node", risk_assessment_node)
+    builder.add_node("generate_prediction_node", generate_prediction_node)
     builder.add_node("provide_guidance_node", provide_guidance_node)
 
     # Set entry
@@ -182,7 +261,8 @@ def build_chat_graph():
         }
     )
     
-    builder.add_edge("risk_assessment_node", "provide_guidance_node")
+    builder.add_edge("risk_assessment_node", "generate_prediction_node")
+    builder.add_edge("generate_prediction_node", "provide_guidance_node")
     
     # End edges
     builder.add_edge("emergency_response_node", END)

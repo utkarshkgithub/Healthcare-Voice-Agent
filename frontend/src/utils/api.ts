@@ -67,10 +67,17 @@ export const chatApi = {
   /**
    * POST /chat
    * Sends a message + conversation history to the LangGraph pipeline.
-   * Returns { reply: string }
+   * Returns { reply: string, predicted_condition?: string, predicted_additional_symptoms?: string[], immediate_remedy?: string }
    */
   send: (message: string, history: string[] = []) =>
-    apiFetch<{ reply: string }>('POST', '/chat', { message, history }),
+    apiFetch<{
+      reply: string;
+      question_rounds?: number;
+      predicted_condition?: string;
+      predicted_additional_symptoms?: string[];
+      immediate_remedy?: string;
+      prediction_summary?: string;
+    }>('POST', '/chat', { message, history }),
 };
 
 // ─── Voice (STT / TTS via backend voice provider) ─────────────────────────────
