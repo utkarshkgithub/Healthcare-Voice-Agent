@@ -20,6 +20,7 @@ class Config:
     DATABASE_URL: str | None = os.getenv("DATABASE_URL")
 
     # ─── LLM Provider ───────────────────────────────────────────────────────
+    # Supported: openai | gemini | cerebras
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai")
 
     OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
@@ -27,6 +28,9 @@ class Config:
 
     GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+    CEREBRAS_API_KEY: str | None = os.getenv("CEREBRAS_API_KEY")
+    CEREBRAS_MODEL: str = os.getenv("CEREBRAS_MODEL", "llama-3.3-70b")
 
     # ─── Speech Provider ──────────────────────────────────────────────────────────────────
     # Supported: webapi (browser-native) | deepgram
@@ -41,19 +45,23 @@ class Config:
         if not cls.DATABASE_URL:
             raise EnvironmentError("DATABASE_URL is required.")
 
-        if cls.LLM_PROVIDER not in {"openai", "gemini"}:
+        supported = {"openai", "gemini", "cerebras"}
+        if cls.LLM_PROVIDER not in supported:
             raise EnvironmentError(
-                "LLM_PROVIDER must be either 'openai' or 'gemini'."
+                f"LLM_PROVIDER must be one of: {', '.join(sorted(supported))}."
             )
 
-        if cls.LLM_PROVIDER == "openai" and not cls.OPENAI_API_KEY:
+        # Only the selected provider's key is required — having all three set
+        # is fine and lets you switch without editing anything.
+        required_keys = {
+            "openai": ("OPENAI_API_KEY", cls.OPENAI_API_KEY),
+            "gemini": ("GEMINI_API_KEY", cls.GEMINI_API_KEY),
+            "cerebras": ("CEREBRAS_API_KEY", cls.CEREBRAS_API_KEY),
+        }
+        env_name, key_value = required_keys[cls.LLM_PROVIDER]
+        if not key_value:
             raise EnvironmentError(
-                "OPENAI_API_KEY is required when LLM_PROVIDER=openai."
-            )
-
-        if cls.LLM_PROVIDER == "gemini" and not cls.GEMINI_API_KEY:
-            raise EnvironmentError(
-                "GEMINI_API_KEY is required when LLM_PROVIDER=gemini."
+                f"{env_name} is required when LLM_PROVIDER={cls.LLM_PROVIDER}."
             )
 
         if cls.VOICE_PROVIDER not in {"webapi", "deepgram"}:

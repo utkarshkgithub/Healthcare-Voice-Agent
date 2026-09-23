@@ -47,5 +47,4 @@ Thumbs.db
 # ==========================
 # Misc
 # ==========================
-*.localbackend/venv/
-backend/node_modules/
+*.local
