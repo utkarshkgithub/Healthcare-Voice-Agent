@@ -3,6 +3,10 @@ LLM Provider abstract base class.
 
 All LLM providers must implement this interface.
 LangGraph nodes call provider methods — never vendor SDKs directly.
+
+Every method here is called by a graph node or a service. Adding a method to
+this ABC is a contract change for all vendors, so prompts that are used by
+exactly one node live behind call_prompt() as .md templates instead of here.
 """
 from abc import ABC, abstractmethod
 
@@ -20,22 +24,7 @@ class LLMProvider(ABC):
     def recommend_specialists(self, symptoms: list[str], available_specialists: list[str]) -> list[str]:
         """
         Given normalized symptoms and a list of available specialist categories,
-        return the 1–2 most appropriate specialists.
-        """
-        ...
-
-    @abstractmethod
-    def generate_response(self, user_message: str, context: str = "") -> str:
-        """
-        Generate a conversational response to a user message.
-        Optional context can be passed to ground the response.
-        """
-        ...
-
-    @abstractmethod
-    def generate_followup(self, symptoms: list[str]) -> str:
-        """
-        Generate a follow-up question to gather more symptom information.
+        return the 1-2 most appropriate specialists.
         """
         ...
 

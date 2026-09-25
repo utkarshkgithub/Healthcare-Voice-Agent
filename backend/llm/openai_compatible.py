@@ -77,14 +77,6 @@ class OpenAICompatibleProvider(LLMProvider):
             if name.strip() in available_specialists
         ]
 
-    def generate_response(self, user_message: str, context: str = "") -> str:
-        user = f"{context}\nPatient: {user_message}" if context else user_message
-        return self._invoke(SYSTEM_COMPASSIONATE, user)
-
-    def generate_followup(self, symptoms: list[str]) -> str:
-        prompt = load_prompt("followup").format(symptoms=symptoms)
-        return self._invoke(SYSTEM_COMPASSIONATE, prompt)
-
     def call_prompt(self, prompt_name: str, **kwargs) -> str:
         prompt = load_prompt(prompt_name).format(**kwargs)
         return self._invoke(SYSTEM_TRIAGE, prompt)

@@ -1,16 +1,21 @@
+# ─── Web framework ────────────────────────────────────────────────────────────
 fastapi
 uvicorn
+python-multipart
+
+# ─── AI orchestration ─────────────────────────────────────────────────────────
 langgraph
-langchain
-openai
+langchain-core
+langchain-openai
 google-generativeai
-pydantic
-python-dotenv
-requests
-tqdm
-numpy
+
+# ─── Database ─────────────────────────────────────────────────────────────────
 psycopg[binary]
 psycopg_pool
+
+# ─── Payments ─────────────────────────────────────────────────────────────────
 razorpay
-python-multipart
-langchain_openai
+
+# ─── Config & voice ───────────────────────────────────────────────────────────
+python-dotenv
+requests
