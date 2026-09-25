@@ -15,6 +15,8 @@ import re
 from typing import List, TypedDict
 from langgraph.graph import StateGraph, END
 from llm.factory import LLMProviderFactory
+from red_flags import detect_red_flags
+from config import Config
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,13 +33,16 @@ class ChatAgentState(TypedDict):
     history: List[str]
     symptoms: str
     is_emergency: bool
+    triggered_red_flags: List[str]
     missing_info: str
     risk_assessment: str
+    urgency: str
     predicted_condition: str
     predicted_additional_symptoms: List[str]
     immediate_remedy: str
     prediction_summary: str
     final_reply: str
+    emergency_red_flags: List[str]
     question_rounds: int
 
 
@@ -76,26 +81,45 @@ def extract_symptoms_node(state: ChatAgentState) -> dict:
 
 def check_emergency_node(state: ChatAgentState) -> dict:
     logger.info("[chat_agent] Checking emergency red flags")
+
+    symptoms = state.get("symptoms", "")
+
+    # Deterministic layer first. This can only escalate, never downgrade: if a
+    # rule fires we short-circuit and never ask the model.
+    rule_flags = detect_red_flags(symptoms)
+    if rule_flags:
+        logger.warning(
+            f"[chat_agent] Deterministic red flag detected: {rule_flags}"
+        )
+        return {"is_emergency": True, "triggered_red_flags": rule_flags}
+
+    # No rule fired — the model's judgement is the deciding signal.
     llm = LLMProviderFactory.create()
-    
-    result = llm.call_prompt(
-        "chat_check_emergency", 
-        symptoms=state.get("symptoms", "")
-    )
-    
+    result = llm.call_prompt("chat_check_emergency", symptoms=symptoms)
+
     is_emergency = "YES" in result.upper()
     logger.info(f"[chat_agent] Emergency: {is_emergency}")
-    return {"is_emergency": is_emergency}
+    return {"is_emergency": is_emergency, "triggered_red_flags": []}
 
 
 def emergency_response_node(state: ChatAgentState) -> dict:
     logger.info("[chat_agent] Generating emergency response")
+    flags = state.get("triggered_red_flags", [])
+
+    # No model call on this path. An emergency instruction must never depend on
+    # the model being reachable or saying the right thing.
     reply = (
-        "Based on what you've described, this sounds like a medical emergency. "
-        "Please hang up and immediately call emergency services or go to the nearest emergency room. "
-        "Do not wait."
+        "Based on what you've described, this needs emergency attention now. "
+        f"Please call {Config.EMERGENCY_NUMBER} or go to your nearest emergency "
+        "department immediately. Do not wait, and do not drive yourself."
     )
-    return {"final_reply": reply}
+    if flags:
+        logger.info(f"[chat_agent] Emergency routed by red flag: {flags}")
+
+    return {
+        "final_reply": reply,
+        "emergency_red_flags": flags,
+    }
 
 
 def check_missing_info_node(state: ChatAgentState) -> dict:

@@ -40,6 +40,11 @@ class Config:
     # ─── Logging ────────────────────────────────────────────────────────────
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
+    # ─── Clinical ───────────────────────────────────────────────────────────
+    #: Number given to the patient on the emergency path. Localised because
+    #: getting this wrong is a real safety issue, not a config nit.
+    EMERGENCY_NUMBER: str = os.getenv("EMERGENCY_NUMBER", "108")
+
     @classmethod
     def validate(cls):
         if not cls.DATABASE_URL:
