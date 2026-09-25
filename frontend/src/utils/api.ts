@@ -63,21 +63,76 @@ export const authApi = {
 
 
 // ─── Chat (LangGraph voice agent) ─────────────────────────────────────────────
+export interface ChatResult {
+  reply: string;
+  question_rounds: number;
+  predicted_condition: string;
+  predicted_additional_symptoms: string[];
+  immediate_remedy: string;
+  prediction_summary: string;
+}
+
 export const chatApi = {
   /**
    * POST /chat
    * Sends a message + conversation history to the LangGraph pipeline.
-   * Returns { reply: string, predicted_condition?: string, predicted_additional_symptoms?: string[], immediate_remedy?: string }
+   *
+   * question_rounds MUST be threaded back in on every call: the backend owns
+   * the clarifying-question cap, and a client that keeps resetting it to 0
+   * makes the agent question the patient indefinitely.
    */
-  send: (message: string, history: string[] = []) =>
-    apiFetch<{
-      reply: string;
-      question_rounds?: number;
-      predicted_condition?: string;
-      predicted_additional_symptoms?: string[];
-      immediate_remedy?: string;
-      prediction_summary?: string;
-    }>('POST', '/chat', { message, history }),
+  send: (message: string, history: string[] = [], questionRounds = 0) =>
+    apiFetch<ChatResult>('POST', '/chat', {
+      message,
+      history,
+      question_rounds: questionRounds,
+    }),
+};
+
+// ─── Triage (specialist mapping + doctor discovery) ───────────────────────────
+export interface Doctor {
+  doctor_id: number;
+  name: string;
+  specialization: string;
+  rating: number;
+  fees: number;
+  hospital: string;
+  next_available_date: string;
+  start_time: string;
+  end_time: string;
+  slot_id: number;
+}
+
+export interface TriageResult {
+  phrases: string[];
+  normalized_symptoms: string[];
+  specialists: string[];
+  recommended_specialists: string[];
+  doctors: Doctor[];
+}
+
+export const triageApi = {
+  /**
+   * POST /run_langgraph
+   * Runs the specialist-mapping graph: normalizes the patient's symptoms,
+   * looks up matching specialties in the database, ranks them, and returns
+   * doctors with their next available slot.
+   */
+  run: (phrases: string[]) =>
+    apiFetch<TriageResult>('POST', '/run_langgraph', { phrases }),
+};
+
+// ─── Appointments ─────────────────────────────────────────────────────────────
+export const appointmentApi = {
+  /** POST /appointments — books a slot. Requires a verified payment_id. */
+  book: (req: {
+    patient_id: number;
+    doctor_id: number;
+    slot_id: number;
+    reason: string;
+    payment_id?: string | null;
+  }) =>
+    apiFetch<{ message: string; appointment_id: number }>('POST', '/appointments', req),
 };
 
 // ─── Voice (STT / TTS via backend voice provider) ─────────────────────────────

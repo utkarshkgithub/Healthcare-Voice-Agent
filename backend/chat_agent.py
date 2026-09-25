@@ -19,6 +19,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+#: How many clarifying questions the agent may ask before it must give guidance.
+#: Bounded deliberately: an unbounded triage questionnaire never terminates, and
+#: a patient who is actually an emergency gets interrogated instead of referred.
+MAX_CLARIFYING_QUESTIONS = 1
+
 # ─── State ─────────────────────────────────────────────────────────────────────
 
 class ChatAgentState(TypedDict):
@@ -217,7 +222,7 @@ def route_after_missing_info_check(state: ChatAgentState) -> str:
     missing = state.get("missing_info", "").upper()
     if "NONE" in missing or not missing.strip():
         return "continue"
-    if state.get("question_rounds", 0) >= 1:
+    if state.get("question_rounds", 0) >= MAX_CLARIFYING_QUESTIONS:
         return "continue"
     return "ask_questions"
 

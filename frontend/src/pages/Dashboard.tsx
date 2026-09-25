@@ -131,7 +131,11 @@ export default function Dashboard() {
   >
     <SpotlightCard className="h-full">
       <div className="relative z-10 flex flex-col h-full space-y-4">
-
+        <span
+          className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${item.color}`}
+        >
+          <Icon size={18} className="text-white" />
+        </span>
 
         <h3 className="text-foreground font-semibold underline">
           {item.title}

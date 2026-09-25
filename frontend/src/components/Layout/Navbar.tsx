@@ -7,8 +7,7 @@ import Logo from './Logo';
 
 export default function Navbar() {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [userName, setUserName] = useState(() => localStorage.getItem('user_name') || 'Patient User');
-  const [userEmail, setUserEmail] = useState(() => localStorage.getItem('user_email') || 'patient@healthai.com');
+  const [userEmail] = useState(() => localStorage.getItem('user_email') || 'patient@healthai.com');
   const navigate = useNavigate();
   const location = useLocation();
 

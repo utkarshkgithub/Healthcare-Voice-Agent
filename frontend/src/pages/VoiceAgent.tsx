@@ -9,8 +9,8 @@ import { MessageList } from '../components/VoiceAgent/MessageList';
 import { ChatInput } from '../components/VoiceAgent/ChatInput';
 import { Message, AgentStatus } from '../types';
 import { voiceProvider } from '../utils/voiceProvider';
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+import { chatApi, triageApi, type Doctor } from '../utils/api';
+import { DoctorList } from '../components/VoiceAgent/DoctorList';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function VoiceAgent() {
@@ -31,8 +31,20 @@ export default function VoiceAgent() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [waveformBars] = useState(() => Array.from({ length: 24 }, (_, i) => i));
 
+  // Structured prediction returned by the triage pipeline, and the doctors
+  // discovered from it. Both feed the booking flow.
+  const [prediction, setPrediction] = useState({
+    condition: '',
+    additionalSymptoms: [] as string[],
+    remedy: '',
+  });
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [triageBusy, setTriageBusy] = useState(false);
+  const [bookingMsg, setBookingMsg] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<string[]>([]);
+  const questionRoundsRef = useRef(0);
   const nextIdRef = useRef(2);
   const animFrameRef = useRef<number>(0);
 
@@ -87,6 +99,36 @@ export default function VoiceAgent() {
     [ttsEnabled],
   );
 
+  // ─── Specialist mapping + doctor discovery ────────────────────────────────
+  // Runs the second LangGraph pipeline: normalized symptoms -> specialties in
+  // the database -> ranked specialists -> doctors with a real open slot.
+  const findDoctors = useCallback(async (phrases: string[]) => {
+    if (!phrases.length) return;
+    setTriageBusy(true);
+    setBookingMsg(null);
+    setDoctors([]);
+    try {
+      const result = await triageApi.run(phrases);
+      setDoctors(result.doctors || []);
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error ? `Doctor lookup failed: ${err.message}` : 'Doctor lookup failed',
+      );
+    } finally {
+      setTriageBusy(false);
+    }
+  }, []);
+
+  const handleBook = useCallback(async (doctor: Doctor) => {
+    if (!localStorage.getItem('patient_id')) {
+      setBookingMsg('Sign in to book an appointment.');
+      return;
+    }
+    setBookingMsg(
+      `Booking with ${doctor.name} on ${doctor.next_available_date} at ${doctor.start_time}…`,
+    );
+  }, []);
+
   // ─── Send message to real /chat endpoint ─────────────────────────────────
   const sendMessage = useCallback(
     async (text: string) => {
@@ -107,18 +149,30 @@ export default function VoiceAgent() {
       setStatus('thinking');
 
       try {
-        const res = await fetch(`${API_BASE}/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text.trim(), history: historySnapshot }),
+        const data = await chatApi.send(
+          text.trim(),
+          historySnapshot,
+          questionRoundsRef.current,
+        );
+        const reply: string = data.reply || "I'm sorry, I couldn't generate a response.";
+
+        // Carry the counter forward or the clarifying-question cap never trips.
+        questionRoundsRef.current = data.question_rounds ?? 0;
+        setPrediction({
+          condition: data.predicted_condition || '',
+          additionalSymptoms: data.predicted_additional_symptoms || [],
+          remedy: data.immediate_remedy || '',
         });
 
-        if (!res.ok) {
-          throw new Error(`Server error ${res.status}: ${res.statusText}`);
+        // Once the pipeline commits to a condition, run specialist mapping so
+        // the patient sees who they can actually see next.
+        if (data.predicted_condition) {
+          const phrases = [
+            ...(data.predicted_additional_symptoms || []),
+            data.predicted_condition,
+          ];
+          if (phrases.length) void findDoctors(phrases);
         }
-
-        const data = await res.json();
-        const reply: string = data.reply || "I'm sorry, I couldn't generate a response.";
 
         historyRef.current = [...historyRef.current, `Assistant: ${reply}`];
         if (historyRef.current.length > 20) {
@@ -152,7 +206,7 @@ export default function VoiceAgent() {
         setStatus('idle');
       }
     },
-    [speakReply],
+    [speakReply, findDoctors],
   );
 
   // ─── Handle text input submit ─────────────────────────────────────────────
@@ -317,6 +371,16 @@ export default function VoiceAgent() {
             handleTextSend={handleTextSend}
             isBusy={isBusy}
           />
+
+          <div className="mx-auto w-full max-w-2xl px-4 pb-6">
+            <DoctorList
+              doctors={doctors}
+              busy={triageBusy}
+              message={bookingMsg}
+              prediction={prediction}
+              onBook={handleBook}
+            />
+          </div>
         </div>
       </div>
     </div>
