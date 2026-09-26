@@ -28,6 +28,9 @@ class ChatResponse(BaseModel):
     predicted_additional_symptoms: list[str] = Field(default_factory=list)
     immediate_remedy: str = ""
     prediction_summary: str = ""
+    is_emergency: bool = False
+    triggered_red_flags: list[str] = Field(default_factory=list)
+    urgency: str = ""
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -54,6 +57,9 @@ def chat(request: ChatRequest):
             predicted_additional_symptoms=predicted_additional_symptoms,
             immediate_remedy=immediate_remedy,
             prediction_summary=prediction_summary,
+            is_emergency=bool(final_state.get("is_emergency", False)),
+            triggered_red_flags=final_state.get("triggered_red_flags", []),
+            urgency=final_state.get("urgency", ""),
         )
     except Exception as e:
         logger.error(f"[chat] LLM error: {e}")

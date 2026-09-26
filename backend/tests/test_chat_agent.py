@@ -14,7 +14,9 @@ from chat_agent import (
     MAX_CLARIFYING_QUESTIONS,
     route_after_emergency_check,
     route_after_missing_info_check,
+    route_after_risk_assessment,
     _parse_prediction_payload,
+    _parse_urgency,
 )
 
 
@@ -82,6 +84,34 @@ def test_malformed_json_degrades_to_empty_not_raises():
 
 def test_json_array_is_not_treated_as_object():
     assert _parse_prediction_payload('["a","b"]') == {}
+
+
+# ─── Urgency parsing and routing ──────────────────────────────────────────
+
+
+def test_parses_each_urgency_level():
+    for level in ("Routine", "Urgent", "Emergency"):
+        text = f"Urgency: {level}\nIllness Category: viral\nConfidence: High"
+        assert _parse_urgency(text) == level
+
+
+def test_urgency_parsing_is_case_insensitive():
+    assert _parse_urgency("urgency: routine") == "Routine"
+
+
+def test_unparseable_assessment_escalates_rather_than_assumes_routine():
+    # Defaulting to Routine would silently drop the "see a clinician" advice.
+    assert _parse_urgency("I think it might be nothing serious") == "Urgent"
+    assert _parse_urgency("") == "Urgent"
+
+
+def test_emergency_urgency_routes_to_hard_stop():
+    assert route_after_risk_assessment({"urgency": "Emergency"}) == "escalate"
+
+
+def test_non_emergency_urgency_continues_to_prediction():
+    assert route_after_risk_assessment({"urgency": "Urgent"}) == "continue"
+    assert route_after_risk_assessment({"urgency": "Routine"}) == "continue"
 
 
 if __name__ == "__main__":

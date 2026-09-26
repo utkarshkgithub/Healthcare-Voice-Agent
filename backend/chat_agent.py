@@ -46,6 +46,28 @@ class ChatAgentState(TypedDict):
     question_rounds: int
 
 
+#: Urgency levels the pipeline routes on. Anything unrecognised is escalated.
+URGENCY_LEVELS = ("Routine", "Urgent", "Emergency")
+
+
+def _parse_urgency(assessment: str) -> str:
+    """
+    Extract the urgency level from the risk assessment text.
+
+    Defaults to "Urgent" when no level is found: an unparseable assessment
+    must not be treated as low risk.
+    """
+    if not assessment:
+        return "Urgent"
+    for line in assessment.splitlines():
+        if line.strip().lower().startswith("urgency:"):
+            value = line.split(":", 1)[1].strip()
+            for level in URGENCY_LEVELS:
+                if value.lower() == level.lower():
+                    return level
+    return "Urgent"
+
+
 def _parse_prediction_payload(raw: str) -> dict:
     text = raw.strip()
     fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.S | re.I)
@@ -158,16 +180,21 @@ def risk_assessment_node(state: ChatAgentState) -> dict:
     logger.info("[chat_agent] Performing risk assessment")
     llm = LLMProviderFactory.create()
     history_str = "\n".join(state.get("history", []))
-    
+
     assessment = llm.call_prompt(
-        "chat_risk_assessment", 
-        history=history_str, 
+        "chat_risk_assessment",
+        history=history_str,
         message=state["message"],
         symptoms=state.get("symptoms", "")
     )
-    
-    logger.info(f"[chat_agent] Risk Assessment: {assessment}")
-    return {"risk_assessment": assessment}
+
+    # The assessment only matters if it changes control flow, so parse the
+    # urgency out of it and route on that. Anything unparseable is treated as
+    # Urgent: defaulting to Routine would let a garbled response silently skip
+    # the escalation advice.
+    urgency = _parse_urgency(assessment)
+    logger.info(f"[chat_agent] Risk Assessment: {assessment} -> urgency={urgency}")
+    return {"risk_assessment": assessment, "urgency": urgency}
 
 
 def generate_prediction_node(state: ChatAgentState) -> dict:
@@ -223,15 +250,17 @@ def provide_guidance_node(state: ChatAgentState) -> dict:
     logger.info("[chat_agent] Providing guidance and safety net")
     llm = LLMProviderFactory.create()
     history_str = "\n".join(state.get("history", []))
-    
+
+    urgency = state.get("urgency", "Urgent")
     reply = llm.call_prompt(
-        "chat_guidance", 
-        history=history_str, 
+        "chat_guidance",
+        history=history_str,
         message=state["message"],
         risk_assessment=state.get("risk_assessment", ""),
-        prediction_summary=state.get("prediction_summary", "")
+        prediction_summary=state.get("prediction_summary", ""),
+        urgency=urgency,
     )
-    
+
     return {"final_reply": reply}
 
 # ─── Conditional Routers ────────────────────────────────────────────────────────
@@ -249,6 +278,19 @@ def route_after_missing_info_check(state: ChatAgentState) -> str:
     if state.get("question_rounds", 0) >= MAX_CLARIFYING_QUESTIONS:
         return "continue"
     return "ask_questions"
+
+
+def route_after_risk_assessment(state: ChatAgentState) -> str:
+    """
+    Route on the clinical urgency, not just on the emergency flag.
+
+    An assessment that escalates to Emergency must reach the same hard-stop
+    terminal as the red-flag path, otherwise the model can talk the patient
+    into staying in a conversational flow while telling them to be urgent.
+    """
+    if state.get("urgency") == "Emergency":
+        return "escalate"
+    return "continue"
 
 
 # ─── Graph builder ──────────────────────────────────────────────────────────────
@@ -290,7 +332,15 @@ def build_chat_graph():
         }
     )
     
-    builder.add_edge("risk_assessment_node", "generate_prediction_node")
+    builder.add_conditional_edges(
+        "risk_assessment_node",
+        route_after_risk_assessment,
+        {
+            "escalate": "emergency_response_node",
+            "continue": "generate_prediction_node"
+        }
+    )
+
     builder.add_edge("generate_prediction_node", "provide_guidance_node")
     
     # End edges
