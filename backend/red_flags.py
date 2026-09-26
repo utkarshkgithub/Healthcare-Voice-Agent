@@ -22,8 +22,11 @@ RED_FLAG_PATTERNS: list[tuple[str, re.Pattern]] = [
     (
         "cardiac chest pain",
         re.compile(
-            r"\b(chest\s*pain|chest\s*tightness|chest\s*pressure|crushing\s+chest"
-            r"|tightness\s+in\s+(the\s+)?chest)\b",
+            r"\b(chest\s*(pain|pressure|tightness|heaviness)"
+            r"|(?:crushing|squeezing|squeezed|tight|heavy|pressing)\s+chest"
+            r"|chest\s+(?:feels\s+)?(?:like\s+(?:it\s+is\s+)?)?"
+            r"(?:being\s+)?(?:squeezed|tight|heavy|pressed\s+on)"
+            r"|pain\s+in\s+(?:my\s+|the\s+)?chest)\b",
             re.I,
         ),
     ),
@@ -39,18 +42,32 @@ RED_FLAG_PATTERNS: list[tuple[str, re.Pattern]] = [
     (
         "stroke signs",
         re.compile(
-            r"\b(face\s+droop(ing|ed)?|drooping\s+of\s+the\s+face"
-            r"|slurred\s+speech|garbled\s+speech|sudden\s+confusion"
-            r"|inability\s+to\s+speak|cannot\s+speak)\b",
+            r"\b((?:face\s+(?:is\s+)?(?:droop\w*|drooping|sagging)"
+            r"|(?:my\s+)?(?:speech|talking)\s+(?:is\s+)?(?:slurred|garbled|jumbled)"
+            r"|(?:slurred|garbled)\s+(?:speech|talking)"
+            r"|sudden\s+(?:confusion|dizziness|weakness)"
+            r"|(?:cannot|can't|difficulty|trouble)\s+(?:speak|talk)"
+            r"|inability\s+to\s+speak))\b",
             re.I,
         ),
     ),
     (
         "one-sided weakness or numbness",
         re.compile(
-            r"\b(one[- ]sided|one\s+side\s+of\s+(the\s+)?body|left\s+(arm|leg|side)"
-            r"|right\s+(arm|leg|side)|hemiparesis|hemiplegia"
-            r"|face\s+weakness|arm\s+weakness)\b",
+            r"\b((?:one|1)[\s-]?(?:sided|side)\s+(?:of\s+)?(?:my|the|his|her|their)?\s*body"
+            r"|(?:my\s+)?(?:face|arm|arm|hand|leg|foot)\s+(?:has\s+)?(?:gone\s+)?"
+            r"(?:weak|numb|tingl\w*|paralysed|paralyzed)"
+            r"|(?:left|right)[\s-]?(?:arm|leg|hand|foot|side)"
+            r"|hemiparesis|hemiplegia)\b",
+            re.I,
+        ),
+    ),
+    (
+        "thunderclap headache",
+        re.compile(
+            r"\b((?:sudden|worst|severe)\s+(?:severe\s+|worst\s+)?headache"
+            r"|thunderclap"
+            r"|worst\s+headache\s+(?:of\s+my\s+life|i'?ve\s+ever\s+had))\b",
             re.I,
         ),
     ),
@@ -70,7 +87,9 @@ RED_FLAG_PATTERNS: list[tuple[str, re.Pattern]] = [
         "uncontrolled bleeding",
         re.compile(
             r"\b(uncontrolled\s+bleeding|heavy\s+bleeding|haemorrhage|hemorrhage"
-            r"|bleeding\s+that\s+won'?t\s+stop)\b",
+            r"|bleeding\s+that\s+(?:won'?t|will\s+not)\s+stop"
+            r"|blood\s+(?:that\s+)?(?:keeps?|won'?t|will\s+not)\s+(?:coming|stop\w*)"
+            r"|bleeding\s+(?:heavily|a\s+lot))\b",
             re.I,
         ),
     ),
