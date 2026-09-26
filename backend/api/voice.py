@@ -9,9 +9,10 @@ both endpoints return HTTP 501 (Not Implemented) because STT/TTS are
 handled by the browser's Web Speech API.
 """
 import logging
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from auth import get_current_user
 from voice.factory import VoiceProviderFactory
 
 router = APIRouter(tags=["voice"])
@@ -19,11 +20,14 @@ logger = logging.getLogger(__name__)
 
 
 class TtsRequest(BaseModel):
-    text: str
+    text: str = Field(min_length=1, max_length=4000)
 
 
 @router.post("/stt")
-async def speech_to_text(audio: UploadFile = File(...)):
+async def speech_to_text(
+    audio: UploadFile = File(...),
+    user_id: int = Depends(get_current_user),
+):
     """
     Accept an audio file upload and return its transcript.
 
@@ -53,7 +57,10 @@ async def speech_to_text(audio: UploadFile = File(...)):
 
 
 @router.post("/tts")
-async def text_to_speech(request: TtsRequest):
+async def text_to_speech(
+    request: TtsRequest,
+    user_id: int = Depends(get_current_user),
+):
     """
     Accept a text payload and return synthesized MP3 audio bytes.
 

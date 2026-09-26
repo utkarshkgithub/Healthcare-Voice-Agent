@@ -30,8 +30,9 @@ export default function Signup() {
     setLoading(true);
     try {
       const data = await authApi.register(name, email, password);
-      localStorage.setItem('token', data.user_id);
-      localStorage.setItem('user_id', data.user_id);
+      localStorage.setItem('token', data.access_token);
+      localStorage.setItem('user_id', String(data.user_id));
+      if (data.patient_id) localStorage.setItem('patient_id', String(data.patient_id));
       if (data.name || name) localStorage.setItem('user_name', data.name || name);
       if (data.email || email) localStorage.setItem('user_email', data.email || email);
       navigate('/voice-agent');

@@ -20,9 +20,12 @@ def get_patient_details(user_id: int) -> dict | None:
                 logger.info(f"[patient_repository] get_patient_details user_id={user_id} row={row}")
                 if not row:
                     return None
+                # Normalise date and other types to JSON-safe values here,
+                # so the route does not depend on jsonable_encoder to cope.
+                dob = row[1].isoformat() if row[1] else None
                 return {
                     "name": row[0],
-                    "date_of_birth": row[1],
+                    "date_of_birth": dob,
                     "gender": row[2],
                     "contact_number": row[3],
                     "medical_record_number": row[4],

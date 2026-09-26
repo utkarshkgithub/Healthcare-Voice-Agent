@@ -18,6 +18,9 @@ class Config:
 
     # ─── Database ───────────────────────────────────────────────────────────
     DATABASE_URL: str | None = os.getenv("DATABASE_URL")
+    DB_POOL_MIN_SIZE: int = int(os.getenv("DB_POOL_MIN_SIZE", "1"))
+    DB_POOL_MAX_SIZE: int = int(os.getenv("DB_POOL_MAX_SIZE", "10"))
+    DB_POOL_TIMEOUT: int = int(os.getenv("DB_POOL_TIMEOUT", "10"))
 
     # ─── LLM Provider ───────────────────────────────────────────────────────
     # Supported: openai | gemini | cerebras
@@ -45,10 +48,24 @@ class Config:
     #: getting this wrong is a real safety issue, not a config nit.
     EMERGENCY_NUMBER: str = os.getenv("EMERGENCY_NUMBER", "108")
 
+    # ─── Auth ───────────────────────────────────────────────────────────────
+    #: Signing key for access tokens. Must be set explicitly in production;
+    #: a generated fallback would silently change on every restart and
+    #: invalidate every issued token.
+    JWT_SECRET: str = os.getenv("JWT_SECRET", "")
+    JWT_TTL_SECONDS: int = int(os.getenv("JWT_TTL_SECONDS", "3600"))
+
     @classmethod
     def validate(cls):
         if not cls.DATABASE_URL:
             raise EnvironmentError("DATABASE_URL is required.")
+
+        if cls.DB_POOL_MIN_SIZE < 1:
+            raise EnvironmentError("DB_POOL_MIN_SIZE must be at least 1.")
+        if cls.DB_POOL_MAX_SIZE < cls.DB_POOL_MIN_SIZE:
+            raise EnvironmentError(
+                "DB_POOL_MAX_SIZE must be greater than or equal to DB_POOL_MIN_SIZE."
+            )
 
         supported = {"openai", "gemini", "cerebras"}
         if cls.LLM_PROVIDER not in supported:
@@ -77,4 +94,10 @@ class Config:
         if cls.VOICE_PROVIDER == "deepgram" and not cls.DEEPGRAM_API_KEY:
             raise EnvironmentError(
                 "DEEPGRAM_API_KEY is required when VOICE_PROVIDER=deepgram."
+            )
+
+        if not cls.JWT_SECRET:
+            raise EnvironmentError(
+                "JWT_SECRET is required. Generate one with: "
+                "python -c \"import secrets; print(secrets.token_urlsafe(48))\""
             )

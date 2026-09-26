@@ -30,31 +30,33 @@ async function apiFetch<T>(
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
+export interface AuthResult {
+  message: string;
+  access_token: string;
+  token_type: string;
+  user_id: number;
+  patient_id: number | null;
+  name?: string;
+  email?: string;
+}
+
 export const authApi = {
-  /**
-   * POST /auth/login
-   * Returns { message, user_id, name, email }
-   */
+  /** POST /auth/login — returns a signed access token. */
   login: (email: string, password: string) =>
-    apiFetch<{ message: string; user_id: string; name?: string; email?: string }>('POST', '/auth/login', { email, password }),
+    apiFetch<AuthResult>('POST', '/auth/login', { email, password }),
 
-  /**
-   * POST /auth/register
-   * Returns { message, user_id, name, email }
-   */
+  /** POST /auth/register — returns a signed access token. */
   register: (name: string, email: string, password: string) =>
-    apiFetch<{ message: string; user_id: string; name?: string; email?: string }>('POST', '/auth/register', { name, email, password }),
+    apiFetch<AuthResult>('POST', '/auth/register', { name, email, password }),
 
-  /**
-   * GET /auth/me/{userId}
-   * Returns { email, name }
-   */
-  getMe: (userId: string) =>
-    apiFetch<{ email: string; name: string }>('GET', `/auth/me/${userId}`),
+  /** GET /auth/me — identity resolved from the bearer token. */
+  getMe: () =>
+    apiFetch<{ email: string; name: string; user_id: number; patient_id: number | null }>('GET', '/auth/me'),
 
   logout: () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user_id');
+    localStorage.removeItem('patient_id');
     localStorage.removeItem('user_name');
     localStorage.removeItem('user_email');
     localStorage.removeItem('voice_sessions');

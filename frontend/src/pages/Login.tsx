@@ -19,9 +19,10 @@ export default function Login() {
 
     try {
       const data = await authApi.login(email, password);
-      // Store user_id as the session token (backend returns user_id, not JWT yet)
-      localStorage.setItem('token', data.user_id);
-      localStorage.setItem('user_id', data.user_id);
+      // Store the signed access token, verified server-side on every request.
+      localStorage.setItem('token', data.access_token);
+      localStorage.setItem('user_id', String(data.user_id));
+      if (data.patient_id) localStorage.setItem('patient_id', String(data.patient_id));
       if (data.name) localStorage.setItem('user_name', data.name);
       if (data.email) localStorage.setItem('user_email', data.email);
       navigate('/voice-agent');
