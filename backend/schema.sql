@@ -286,6 +286,54 @@ END;
 $$ LANGUAGE plpgsql;
 
 
+-- Payments: record an order when it is created, so verification can be
+-- matched against an amount the client cannot choose.
+CREATE OR REPLACE FUNCTION sp_record_payment_order(
+    p_order_id TEXT,
+    p_amount   INTEGER,
+    p_currency TEXT DEFAULT 'INR'
+)
+RETURNS INTEGER AS $$
+DECLARE
+    v_id INTEGER;
+BEGIN
+    INSERT INTO payments (razorpay_order_id, amount, currency, status)
+    VALUES (p_order_id, p_amount, p_currency, 'created')
+    ON CONFLICT (razorpay_order_id) DO UPDATE SET amount = EXCLUDED.amount
+    RETURNING id INTO v_id;
+    RETURN v_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Mark an order captured. Returns FALSE when the order is unknown, which is
+-- how a verified signature for an order we never created gets rejected.
+CREATE OR REPLACE FUNCTION sp_capture_payment(
+    p_order_id   TEXT,
+    p_payment_id TEXT
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_found BOOLEAN := FALSE;
+BEGIN
+    UPDATE payments
+    SET status = 'captured', razorpay_payment_id = p_payment_id
+    WHERE razorpay_order_id = p_order_id AND status <> 'captured';
+    GET DIAGNOSTICS v_found = ROW_COUNT;
+    RETURN v_found;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION sp_get_payment(p_payment_id TEXT)
+RETURNS TABLE (
+    payment_id TEXT,
+    amount     INTEGER,
+    status     TEXT
+) AS $$
+    SELECT p.razorpay_payment_id, p.amount, p.status
+    FROM payments p
+    WHERE p.razorpay_payment_id = p_payment_id;
+$$ LANGUAGE sql;
+
 -- =============================================================================
 -- SEED DATA — 5 specialties, doctors, symptom map, and bookable slots
 -- =============================================================================

@@ -126,7 +126,11 @@ export const triageApi = {
 
 // ─── Appointments ─────────────────────────────────────────────────────────────
 export const appointmentApi = {
-  /** POST /appointments — books a slot. Requires a verified payment_id. */
+  /**
+   * POST /appointments — books a slot.
+   * Requires a payment_id captured by the payments flow; the server rejects
+   * any payment it did not record itself.
+   */
   book: (req: {
     patient_id: number;
     doctor_id: number;
@@ -136,6 +140,105 @@ export const appointmentApi = {
   }) =>
     apiFetch<{ message: string; appointment_id: number }>('POST', '/appointments', req),
 };
+
+// ─── Payments (Razorpay) ──────────────────────────────────────────────────────
+export const paymentApi = {
+  /** POST /payments/create-order — server fixes the amount. */
+  createOrder: (amount: number, receipt: string) =>
+    apiFetch<{ order_id: string; amount: number; currency: string; key_id: string }>(
+      'POST',
+      '/payments/create-order',
+      { amount, currency: 'INR', receipt },
+    ),
+
+  /** POST /payments/verify — records the payment as captured. */
+  verify: (razorpay_order_id: string, razorpay_payment_id: string, razorpay_signature: string) =>
+    apiFetch<{ verified: boolean; payment_id: string }>('POST', '/payments/verify', {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+    }),
+};
+
+// ─── Razorpay checkout (loads the SDK once, then opens the modal) ─────────────
+declare global {
+  interface Window {
+    Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
+  }
+}
+
+let checkoutScript: Promise<boolean> | null = null;
+
+/** Loads checkout.js from Razorpay's CDN exactly once per page session. */
+function loadCheckout(): Promise<boolean> {
+  if (window.Razorpay) return Promise.resolve(true);
+  if (checkoutScript) return checkoutScript;
+
+  checkoutScript = new Promise<boolean>((resolve) => {
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+  return checkoutScript;
+}
+
+/**
+ * Runs the full pay-then-book flow.
+ *
+ * The amount is never computed on the client for authorisation purposes — the
+ * server records the order and re-checks the captured payment at booking time.
+ * Returns the verified payment_id, or null if the patient cancelled.
+ */
+export async function payAndBook(
+  doctor: Doctor,
+  patientId: number,
+  reason: string,
+): Promise<{ payment_id: string } | null> {
+  if (!(await loadCheckout()) || !window.Razorpay) {
+    throw new Error('Could not load the payment window.');
+  }
+
+  // Razorpay works in the smallest currency unit.
+  const order = await paymentApi.createOrder(doctor.fees * 100, `appt-${doctor.slot_id}`);
+
+  return new Promise((resolve, reject) => {
+    const checkout = new window.Razorpay!({
+      key: order.key_id,
+      amount: order.amount,
+      currency: order.currency,
+      order_id: order.order_id,
+      name: 'Healthcare Voice Agent',
+      description: `${doctor.specialization} consultation`,
+      prefill: {},
+      theme: { color: '#10b981' },
+      handler: async (response: Record<string, string>) => {
+        try {
+          const verified = await paymentApi.verify(
+            response.razorpay_order_id,
+            response.razorpay_payment_id,
+            response.razorpay_signature,
+          );
+          await appointmentApi.book({
+            patient_id: patientId,
+            doctor_id: doctor.doctor_id,
+            slot_id: doctor.slot_id,
+            reason,
+            payment_id: verified.payment_id,
+          });
+          resolve({ payment_id: verified.payment_id });
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error('Payment failed.'));
+        }
+      },
+      modal: {
+        ondismiss: () => resolve(null),
+      },
+    });
+    checkout.open();
+  });
+}
 
 // ─── Voice (STT / TTS via backend voice provider) ─────────────────────────────
 export const voiceApi = {

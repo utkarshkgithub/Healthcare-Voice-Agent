@@ -9,7 +9,7 @@ import { MessageList } from '../components/VoiceAgent/MessageList';
 import { ChatInput } from '../components/VoiceAgent/ChatInput';
 import { Message, AgentStatus } from '../types';
 import { voiceProvider } from '../utils/voiceProvider';
-import { chatApi, triageApi, type Doctor } from '../utils/api';
+import { chatApi, triageApi, payAndBook, type Doctor } from '../utils/api';
 import { DoctorList } from '../components/VoiceAgent/DoctorList';
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -120,14 +120,35 @@ export default function VoiceAgent() {
   }, []);
 
   const handleBook = useCallback(async (doctor: Doctor) => {
-    if (!localStorage.getItem('patient_id')) {
+    const patientId = localStorage.getItem('patient_id');
+    if (!patientId) {
       setBookingMsg('Sign in to book an appointment.');
       return;
     }
+
     setBookingMsg(
       `Booking with ${doctor.name} on ${doctor.next_available_date} at ${doctor.start_time}…`,
     );
-  }, []);
+    try {
+      const result = await payAndBook(
+        doctor,
+        Number(patientId),
+        prediction.condition || 'General consultation',
+      );
+      if (!result) {
+        setBookingMsg('Payment cancelled. The slot is still available.');
+        return;
+      }
+      setBookingMsg(
+        `Booked with ${doctor.name} on ${doctor.next_available_date} at ${doctor.start_time}.`,
+      );
+      // Refresh the list so the booked slot disappears from discovery.
+      setDoctors((prev) => prev.filter((d) => d.slot_id !== doctor.slot_id));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Booking failed';
+      setBookingMsg(message.includes('just taken') ? 'That slot was just taken.' : message);
+    }
+  }, [prediction.condition]);
 
   // ─── Send message to real /chat endpoint ─────────────────────────────────
   const sendMessage = useCallback(

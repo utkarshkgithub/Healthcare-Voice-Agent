@@ -1,8 +1,10 @@
 """
 Payments API routes — /payments
 """
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
+from auth import get_current_user
+from repositories import payment_repository
 import os
 import logging
 import hashlib
@@ -67,7 +69,11 @@ def create_order(req: CreateOrderRequest):
         
         # Create order
         order = client.order.create(data=order_data)
-        
+
+        # Record it server-side now, so the amount is fixed before the client
+        # ever sees it and verification can be checked against a known order.
+        payment_repository.record_order(order["id"], req.amount, req.currency)
+
         return {
             "order_id": order["id"],
             "amount": order["amount"],
@@ -80,35 +86,41 @@ def create_order(req: CreateOrderRequest):
 
 
 @router.post("/payments/verify")
-def verify_payment(req: VerifyPaymentRequest):
-    """Verify a Razorpay payment signature"""
+def verify_payment(req: VerifyPaymentRequest, user_id: int = Depends(get_current_user)):
+    """
+    Verify a Razorpay payment signature and record the payment.
+
+    Recording is the point. A valid signature on an order we never created is
+    rejected, and only a recorded, captured payment can be used to book.
+    """
     if not client:
         raise HTTPException(status_code=503, detail="Payment service unavailable")
-    
+
     try:
-        # Verify signature
-        params_dict = {
+        # Raises on a bad signature.
+        client.utility.verify_payment_signature({
             'razorpay_order_id': req.razorpay_order_id,
             'razorpay_payment_id': req.razorpay_payment_id,
             'razorpay_signature': req.razorpay_signature
-        }
-        
-        # client.utility.verify_payment_signature(params_dict) will raise exception if invalid
-        client.utility.verify_payment_signature(params_dict)
-        
-        # Payment is verified, you can now create appointment or update payment status
-        return {
-            "verified": True,
-            "message": "Payment verified successfully",
-            "order_id": req.razorpay_order_id,
-            "payment_id": req.razorpay_payment_id
-        }
+        })
     except razorpay.errors.SignatureVerificationError:
         logger.error(f"[payments] Signature verification failed for order: {req.razorpay_order_id}")
         raise HTTPException(status_code=400, detail="Invalid payment signature")
     except Exception as e:
         logger.error(f"[payments] Verification failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Payment verification failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Payment verification failed")
+
+    if not payment_repository.capture_payment(req.razorpay_order_id, req.razorpay_payment_id):
+        logger.error(f"[payments] Verified signature for unknown order {req.razorpay_order_id}")
+        raise HTTPException(status_code=400, detail="Unknown payment order")
+
+    logger.info(f"[payments] Captured payment {req.razorpay_payment_id} for user {user_id}")
+    return {
+        "verified": True,
+        "message": "Payment verified successfully",
+        "order_id": req.razorpay_order_id,
+        "payment_id": req.razorpay_payment_id
+    }
 
 
 @router.post("/payments/webhook")

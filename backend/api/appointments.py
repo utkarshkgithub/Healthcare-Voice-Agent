@@ -4,7 +4,7 @@ Appointments API routes — /appointments
 from fastapi import APIRouter, Depends, HTTPException
 from auth import get_current_user
 from models import AppointmentRequest
-from repositories import appointment_repository, patient_repository
+from repositories import appointment_repository, patient_repository, payment_repository
 import logging
 
 router = APIRouter(tags=["appointments"])
@@ -30,6 +30,17 @@ def create_appointment(
         raise HTTPException(
             status_code=403, detail="Cannot book an appointment for another patient."
         )
+
+    # Payment must already be captured for this slot's fee. Booking used to
+    # accept any payment_id string, or none at all, so a client could simply
+    # skip the payment step entirely.
+    if not req.payment_id:
+        raise HTTPException(status_code=402, detail="Payment required to confirm booking.")
+
+    payment = payment_repository.get_payment(req.payment_id)
+    if not payment or payment["status"] != "captured":
+        logger.warning(f"[appointments] Rejected unverified payment {req.payment_id}")
+        raise HTTPException(status_code=402, detail="Payment could not be verified.")
 
     logger.info(
         f"[appointments] Creating for patient_id={patient_id} "

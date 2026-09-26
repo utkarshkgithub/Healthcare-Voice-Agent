@@ -21,8 +21,26 @@ if not os.getenv("DATABASE_URL"):
     pytest.skip("DATABASE_URL not set", allow_module_level=True)
 
 from main import app  # noqa: E402  (import after the env guard)
+from repositories import payment_repository  # noqa: E402
 
 client = TestClient(app)
+
+
+def _any_open_slot(doctor_id: int) -> int:
+    """First unbooked slot for a doctor, so booking tests do not collide."""
+    with payment_repository.pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id FROM appointment_slots
+                WHERE doctor_id = %s AND is_booked = FALSE AND slot_date >= CURRENT_DATE
+                ORDER BY slot_date, start_time LIMIT 1
+                """,
+                (doctor_id,),
+            )
+            row = cur.fetchone()
+    assert row, "no open slots seeded"
+    return row[0]
 
 
 @pytest.fixture
@@ -118,6 +136,104 @@ def test_booking_requires_authentication():
         json={"patient_id": 1, "doctor_id": 1, "slot_id": 1, "reason": "test"},
     )
     assert response.status_code == 401
+
+
+def test_booking_without_payment_is_rejected(account):
+    """The slot is still bookable, but money must have been captured first."""
+    headers, _, patient_id = account
+    response = client.post(
+        "/appointments",
+        headers=headers,
+        json={
+            "patient_id": patient_id,
+            "doctor_id": 1,
+            "slot_id": _any_open_slot(1),
+            "reason": "test",
+        },
+    )
+    assert response.status_code == 402
+
+
+def test_booking_with_forged_payment_id_is_rejected(account):
+    """A payment_id the server never recorded must not book anything."""
+    headers, _, patient_id = account
+    response = client.post(
+        "/appointments",
+        headers=headers,
+        json={
+            "patient_id": patient_id,
+            "doctor_id": 1,
+            "slot_id": _any_open_slot(1),
+            "reason": "test",
+            "payment_id": "pay_definitely_not_real",
+        },
+    )
+    assert response.status_code == 402
+
+
+def test_booking_with_captured_payment_succeeds(account):
+    headers, _, patient_id = account
+    import uuid
+
+    order_id = f"order-{uuid.uuid4().hex[:10]}"
+    payment_id = f"pay-{uuid.uuid4().hex[:10]}"
+
+    payment_repository.record_order(order_id, 80000)
+    assert payment_repository.capture_payment(order_id, payment_id)
+
+    response = client.post(
+        "/appointments",
+        headers=headers,
+        json={
+            "patient_id": patient_id,
+            "doctor_id": 1,
+            "slot_id": _any_open_slot(1),
+            "reason": "test booking",
+            "payment_id": payment_id,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["appointment_id"]
+
+
+def test_slot_cannot_be_booked_twice(account):
+    """Second booking of the same slot must be a conflict, not a second row."""
+    headers, _, patient_id = account
+    import uuid
+
+    def paid_slot():
+        order_id = f"order-{uuid.uuid4().hex[:10]}"
+        payment_id = f"pay-{uuid.uuid4().hex[:10]}"
+        payment_repository.record_order(order_id, 80000)
+        payment_repository.capture_payment(order_id, payment_id)
+        return payment_id
+
+    slot_id = _any_open_slot(2)
+    first = client.post(
+        "/appointments",
+        headers=headers,
+        json={
+            "patient_id": patient_id,
+            "doctor_id": 2,
+            "slot_id": slot_id,
+            "reason": "first",
+            "payment_id": paid_slot(),
+        },
+    )
+    assert first.status_code == 200, first.text
+
+    second = client.post(
+        "/appointments",
+        headers=headers,
+        json={
+            "patient_id": patient_id,
+            "doctor_id": 2,
+            "slot_id": slot_id,
+            "reason": "second",
+            "payment_id": paid_slot(),
+        },
+    )
+    assert second.status_code == 409
 
 
 # ─── Registration edge cases ──────────────────────────────────────────────
