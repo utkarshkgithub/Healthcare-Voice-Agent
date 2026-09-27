@@ -144,13 +144,26 @@ def main() -> int:
 
     worst_case_fnr = None
     if not args.offline:
-        os.environ.setdefault("OPENAI_API_KEY", "unset")
-        try:
-            summary = evaluate_llm(GOLDEN_CASES)
-            report(f"Full pipeline (LLM_PROVIDER={os.getenv('LLM_PROVIDER', 'openai')})", summary)
-            worst_case_fnr = summary["false_negative_rate"]
-        except Exception as exc:
-            print(f"\n  LLM evaluation skipped: {exc}")
+        from dotenv import load_dotenv
+
+        load_dotenv()
+
+        provider = os.getenv("LLM_PROVIDER", "openai")
+        required = {
+            "openai": "OPENAI_API_KEY",
+            "gemini": "GEMINI_API_KEY",
+            "cerebras": "CEREBRAS_API_KEY",
+        }.get(provider, "OPENAI_API_KEY")
+
+        if not os.getenv(required):
+            print(f"\n  LLM evaluation skipped: {required} is not set")
+        else:
+            try:
+                summary = evaluate_llm(GOLDEN_CASES)
+                report(f"Full pipeline (LLM_PROVIDER={provider})", summary)
+                worst_case_fnr = summary["false_negative_rate"]
+            except Exception as exc:
+                print(f"\n  LLM evaluation skipped: {exc}")
 
     if args.fail_under is not None:
         offline_fnr = evaluate_rules(GOLDEN_CASES)["false_negative_rate"]

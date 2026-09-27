@@ -21,6 +21,6 @@ class CerebrasProvider(OpenAICompatibleProvider):
     base_url = "https://api.cerebras.ai/v1"
     api_key_env = "CEREBRAS_API_KEY"
     model_env = "CEREBRAS_MODEL"
-    default_model = "llama-3.3-70b"
+    default_model = "qwen-3.8-27b"
     #: Cerebras uses this header to attribute third-party SDK traffic.
     integration_header = "healthcare-voice-agent"

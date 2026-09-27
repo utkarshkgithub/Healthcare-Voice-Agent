@@ -4,6 +4,11 @@ Prompt template loading.
 Prompts live as .md files in backend/prompts/ so they can be reviewed in a
 diff and edited without a deploy. This module is the single place that knows
 where they live and how to read them.
+
+Templates are rendered with str.format, so any literal brace in a prompt must
+be doubled. A template containing a JSON example is the easy way to get this
+wrong: an unescaped { starts a format field named after whatever follows.
+tests/test_prompts.py checks every template formats cleanly.
 """
 from pathlib import Path
 

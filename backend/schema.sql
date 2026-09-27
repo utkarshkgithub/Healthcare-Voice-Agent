@@ -340,47 +340,132 @@ $$ LANGUAGE sql;
 -- Safe to re-run: every insert is idempotent.
 
 INSERT INTO specialties (name) VALUES
+    ('General Medicine'),
     ('Cardiology'),
     ('Neurology'),
     ('Orthopaedics'),
     ('Dermatology'),
-    ('Gastroenterology')
+    ('Gastroenterology'),
+    ('ENT')
 ON CONFLICT (name) DO NOTHING;
 
 -- Symptom -> specialty mapping.
+--
+-- Both colloquial and CLINICAL terms are listed deliberately. The conversational
+-- pipeline emits clinical terms ("rhinorrhea", "gastritis") while patients speak
+-- colloquial ones ("runny nose", "tummy ache"), so a map keyed on only one
+-- vocabulary returns nothing for half of all traffic.
 INSERT INTO symptom_specialty_map (symptom, specialty) VALUES
-    ('chest pain',          'Cardiology'),
-    ('palpitations',        'Cardiology'),
-    ('shortness of breath', 'Cardiology'),
-    ('high blood pressure', 'Cardiology'),
-    ('chest tightness',     'Cardiology'),
-    ('headache',            'Neurology'),
-    ('migraine',            'Neurology'),
-    ('dizziness',           'Neurology'),
-    ('numbness',            'Neurology'),
-    ('tremor',              'Neurology'),
-    ('seizure',             'Neurology'),
-    ('loss of consciousness','Neurology'),
-    ('joint pain',          'Orthopaedics'),
-    ('back pain',           'Orthopaedics'),
-    ('fracture',            'Orthopaedics'),
-    ('knee pain',           'Orthopaedics'),
-    ('shoulder pain',       'Orthopaedics'),
-    ('sprain',              'Orthopaedics'),
-    ('rash',                'Dermatology'),
-    ('itching',             'Dermatology'),
-    ('skin lesion',         'Dermatology'),
-    ('acne',                'Dermatology'),
-    ('hair loss',           'Dermatology'),
-    ('abdominal pain',      'Gastroenterology'),
-    ('nausea',              'Gastroenterology'),
-    ('diarrhoea',           'Gastroenterology'),
-    ('acid reflux',         'Gastroenterology'),
-    ('bloating',            'Gastroenterology'),
-    ('constipation',        'Gastroenterology')
+    -- General / undifferentiated presentations
+    ('fever',                  'General Medicine'),
+    ('low-grade fever',       'General Medicine'),
+    ('high fever',            'General Medicine'),
+    ('fatigue',               'General Medicine'),
+    ('body ache',             'General Medicine'),
+    ('general body ache',     'General Medicine'),
+    ('malaise',               'General Medicine'),
+    ('chills',                'General Medicine'),
+    ('weakness',              'General Medicine'),
+    ('dehydration',           'General Medicine'),
+    ('flu',                   'General Medicine'),
+    ('influenza',             'General Medicine'),
+    ('viral infection',       'General Medicine'),
+    ('viral upper respiratory infection', 'General Medicine'),
+    ('common cold',           'General Medicine'),
+    ('cough',                 'General Medicine'),
+    ('dry cough',             'General Medicine'),
+    ('congestion',            'General Medicine'),
+    ('nasal congestion',      'General Medicine'),
+    ('runny nose',            'General Medicine'),
+    ('rhinorrhea',            'General Medicine'),
+    ('sore throat',           'General Medicine'),
+    ('pharyngitis',           'ENT'),
+    ('tonsillitis',           'ENT'),
+    ('ear pain',              'ENT'),
+    ('hearing loss',          'ENT'),
+    ('sinus pain',            'ENT'),
+    ('sinusitis',             'ENT'),
+    ('nosebleed',             'ENT'),
+
+    -- Cardiac
+    ('chest pain',            'Cardiology'),
+    ('chest discomfort',      'Cardiology'),
+    ('chest tightness',       'Cardiology'),
+    ('palpitations',          'Cardiology'),
+    ('irregular heartbeat',   'Cardiology'),
+    ('shortness of breath',   'Cardiology'),
+    ('high blood pressure',   'Cardiology'),
+    ('hypertension',          'Cardiology'),
+    ('angina',                'Cardiology'),
+    ('swelling in legs',      'Cardiology'),
+    ('murmur',                'Cardiology'),
+
+    -- Neurological
+    ('headache',              'Neurology'),
+    ('migraine',              'Neurology'),
+    ('migraines',             'Neurology'),
+    ('dizziness',             'Neurology'),
+    ('vertigo',               'Neurology'),
+    ('numbness',              'Neurology'),
+    ('tingling',              'Neurology'),
+    ('tremor',                'Neurology'),
+    ('tremors',               'Neurology'),
+    ('seizure',               'Neurology'),
+    ('loss of consciousness', 'Neurology'),
+    ('fainting',              'Neurology'),
+    ('memory loss',           'Neurology'),
+    ('confusion',             'Neurology'),
+    ('neuropathy',            'Neurology'),
+
+    -- Musculoskeletal
+    ('joint pain',            'Orthopaedics'),
+    ('back pain',             'Orthopaedics'),
+    ('lower back pain',       'Orthopaedics'),
+    ('lower back ache',       'Orthopaedics'),
+    ('knee pain',             'Orthopaedics'),
+    ('shoulder pain',         'Orthopaedics'),
+    ('hip pain',              'Orthopaedics'),
+    ('neck pain',             'Orthopaedics'),
+    ('fracture',              'Orthopaedics'),
+    ('sprain',                'Orthopaedics'),
+    ('osteoarthritis',        'Orthopaedics'),
+    ('muscle strain',         'Orthopaedics'),
+    ('swollen joint',         'Orthopaedics'),
+
+    -- Skin
+    ('rash',                  'Dermatology'),
+    ('skin rash',             'Dermatology'),
+    ('itching',               'Dermatology'),
+    ('skin lesion',           'Dermatology'),
+    ('acne',                  'Dermatology'),
+    ('eczema',                'Dermatology'),
+    ('hives',                 'Dermatology'),
+    ('hair loss',             'Dermatology'),
+    ('skin discoloration',    'Dermatology'),
+    ('wart',                  'Dermatology'),
+
+    -- Gastrointestinal
+    ('abdominal pain',        'Gastroenterology'),
+    ('stomach pain',          'Gastroenterology'),
+    ('tummy ache',            'Gastroenterology'),
+    ('stomach ache',          'Gastroenterology'),
+    ('nausea',                'Gastroenterology'),
+    ('vomiting',              'Gastroenterology'),
+    ('diarrhoea',             'Gastroenterology'),
+    ('diarrhea',              'Gastroenterology'),
+    ('constipation',          'Gastroenterology'),
+    ('bloating',              'Gastroenterology'),
+    ('acid reflux',           'Gastroenterology'),
+    ('heartburn',             'Gastroenterology'),
+    ('gastritis',             'Gastroenterology'),
+    ('abdominal bloating',    'Gastroenterology'),
+    ('loss of appetite',      'Gastroenterology')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO doctors (name, specialization, rating, fees, hospital) VALUES
+    ('Dr. Asha Menon',      'General Medicine', 4.6, 400, 'Sunrise Health Centre'),
+    ('Dr. Varun Pillai',    'General Medicine', 4.5, 500, 'Manipal Hospital'),
+    ('Dr. Nisha Batra',     'General Medicine', 4.7, 450, 'Fortis Multi Speciality'),
     ('Dr. Ananya Rao',     'Cardiology',      4.8, 800,  'Apollo Hospitals'),
     ('Dr. Vikram Desai',   'Cardiology',      4.5, 600,  'Fortis Heart Centre'),
     ('Dr. Meera Iyer',      'Cardiology',      4.9, 1200, 'Narayana Health'),
@@ -395,7 +480,9 @@ INSERT INTO doctors (name, specialization, rating, fees, hospital) VALUES
     ('Dr. Riya Chatterjee','Dermatology',     4.6, 800,  'Fortis Multi Speciality'),
     ('Dr. Arjun Menon',    'Gastroenterology',4.8, 900,  'Manipal Gastro Institute'),
     ('Dr. Sneha Patil',    'Gastroenterology',4.6, 700,  'Apollo Hospitals'),
-    ('Dr. Rahul Verma',    'Gastroenterology',4.4, 550,  'Sunrise Health Centre')
+    ('Dr. Rahul Verma',    'Gastroenterology',4.4, 550,  'Sunrise Health Centre'),
+    ('Dr. Leela Prasad',   'ENT',             4.6, 650,  'Apollo ENT Centre'),
+    ('Dr. Girish Bhat',    'ENT',             4.4, 550,  'Sunrise Health Centre')
 ON CONFLICT (name, specialization, hospital) DO NOTHING;
 
 -- Slots for the next 14 days, 10:00 / 12:00 / 15:00 / 17:00 per doctor.

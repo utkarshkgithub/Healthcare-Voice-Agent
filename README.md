@@ -123,7 +123,7 @@ files imports a vendor SDK.
 **LLM** — `llm/base.py` (ABC) + `llm/factory.py`, selected by `LLM_PROVIDER`:
 
 - `openai` (default) — `langchain_openai`, `gpt-4.1-mini`
-- `cerebras` — OpenAI-compatible endpoint, `llama-3.3-70b`. Recommended for this
+- `cerebras` — OpenAI-compatible endpoint, `qwen-3.8-27b`. Recommended for this
   app: the pipeline makes up to five sequential calls per turn, so cost and latency
   dominate. Reuses the installed SDK, so there is no second dependency.
 - `gemini` — `google-generativeai`, `gemini-2.5-flash`
@@ -223,7 +223,7 @@ psql "$DATABASE_URL" -f backend/schema.sql
 ```
 
 Idempotent — safe to re-run. Creates the tables, all stored procedures, and seeds
-5 specialties, 29 symptom→specialty mappings, 15 doctors and 14 days of slots.
+7 specialties, 93 symptom→specialty mappings, 20 doctors and 14 days of slots.
 
 ### Backend
 
@@ -260,7 +260,7 @@ cd backend
 python -m pytest tests -q
 ```
 
-42 tests covering the red-flag layer, the graph routers, and the API surface
+46 tests covering prompt rendering, the red-flag layer, the graph routers, and the API surface
 against a real database. The API tests stub the LLM where a model would otherwise
 be needed — which is what the provider abstraction is for.
 

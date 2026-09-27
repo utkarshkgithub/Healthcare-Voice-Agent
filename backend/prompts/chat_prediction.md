@@ -14,11 +14,11 @@ Internal Risk Assessment:
 {risk_assessment}
 
 Return EXACTLY valid JSON with these keys:
-{
+{{
   "predicted_condition": "short likely condition or symptom cluster",
   "predicted_additional_symptoms": ["symptom 1", "symptom 2", "symptom 3"],
   "immediate_remedy": "one or two concise self-care or urgent next-step instructions"
-}
+}}
 
 Rules:
 - Do not include markdown, backticks, code fences, or any text outside the JSON object.
