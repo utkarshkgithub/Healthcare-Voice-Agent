@@ -1,305 +1,304 @@
 # 🩺 Healthcare AI Voice Agent
 
-A full-stack healthcare voice assistant that helps users describe symptoms, performs AI-assisted triage, normalizes symptom language, maps conditions to medical specialists, and supports doctor discovery and appointment booking.
+A voice-first triage assistant. A patient describes their symptoms by speaking;
+the system extracts them, screens for emergencies, assesses risk, predicts a likely
+condition, gives guidance, and maps the symptoms to real specialists with bookable
+slots in PostgreSQL.
 
-Built with **FastAPI**, **LangGraph**, **React**, **Vite**, and **PostgreSQL**.
+The clinical decisions are not made by a language model. A deterministic rules layer
+decides escalation, and the model can only ever escalate further — never talk the
+system out of an emergency.
 
----
-
-## Overview
-
-This project is designed as a conversational healthcare assistant with a voice-first interface. A user can speak symptoms, the frontend converts speech to text, and the backend processes the transcript through a structured AI workflow.
-
-The system focuses on:
-
-* symptom intake
-* symptom normalization
-* triage-oriented response generation
-* specialist recommendation
-* doctor lookup
-* appointment booking
-
-This is a **triage and assistance system**, not a diagnostic replacement for a medical professional.
+**This is a triage and routing system. It does not diagnose.**
 
 ---
 
-## Key Features
+## Why the LLM is not the decision maker
 
-* Voice-based symptom input using browser speech APIs
-* AI-assisted symptom normalization
-* LangGraph-based orchestration for structured medical conversation flow
-* Specialist mapping from symptom clusters
-* Doctor discovery and booking workflow
-* FastAPI backend with modular service layers
-* PostgreSQL-backed persistence
-* Provider abstraction for LLM integrations
-* React + Vite frontend for a responsive UI
-* Middleware for request tracing and operational visibility
+An LLM wrapper asks a model what to do. This system constrains it:
+
+| Concern | Who decides |
+|---|---|
+| Is this an emergency? | `red_flags.py` rules **OR** the model — the model may only escalate |
+| What urgency? | Model's `Urgency` value, parsed and used to **route the graph** |
+| Which specialties? | Database mapping via `sp_get_specialists`, LLM may only pick from that list |
+| Which doctors/slots? | PostgreSQL, with a unique constraint preventing double-booking |
+| Was money taken? | The database, re-checked at booking time |
+
+Measured on a 27-case golden set (`backend/evals/`):
+
+```
+accuracy               100.0%
+false-negative rate      0.0%   <- emergencies missed
+false-positive rate      0.0%
+```
+
+```bash
+cd backend && python -m evals.run_eval --offline   # no network, no API cost
+```
 
 ---
 
 ## Architecture
 
-```text
-User Voice Input
-      ↓
-React Frontend
-      ↓
-Speech-to-Text
-      ↓
-FastAPI Backend
-      ↓
-LangGraph Workflow
-      ↓
-Symptom Normalization
-      ↓
-Triage / Risk Assessment
-      ↓
-Specialist Mapping
-      ↓
-Doctor Lookup
-      ↓
-Appointment Booking
-      ↓
-PostgreSQL
+```
+Browser (React 19 + Vite)
+  VoiceAgent.tsx
+    ├── utils/voiceProvider.ts    STT/TTS adapter (interface + 2 implementations)
+    └── utils/api.ts              typed HTTP client
+          │
+          ▼
+FastAPI  (main.py — middleware, CORS, request IDs, routers)
+  │
+  ├── /chat          → chat_agent.build_chat_graph()      8 nodes, 2 routers
+  ├── /run_langgraph → triage_service.run_triage()        4 nodes, linear
+  ├── /auth /patient-details /medical-history /appointments
+  ├── /payments/{create-order,verify,webhook}
+  └── /stt /tts      → voice/factory.py
+          │
+   ┌──────┴─────────┐
+ llm/              repositories/          voice/
+ OpenAI|Cerebras   → psycopg pool → PG    Deepgram | WebApi (browser)
+ Gemini
+ prompts/*.md  (9 templates)
 ```
 
+**Layer rule:** routes handle HTTP only; `services/` owns business logic;
+`repositories/` owns data access and contains no business logic. No route contains
+SQL and no node imports a vendor SDK.
+
 ---
 
-## Repository Structure
+## The conversational pipeline — 8 nodes
 
-```text
-Healthcare-AI-Voice-agent/
-├── backend/
-│   ├── api/
-│   ├── providers/
-│   ├── repositories/
-│   ├── services/
-│   ├── prompts/
-│   ├── chat_agent.py
-│   ├── langgraph_llm_agents.py
-│   ├── db.py
-│   ├── config.py
-│   ├── models.py
-│   ├── main.py
-│   └── requirements.txt
-│
-├── frontend/
-│   ├── public/
-│   ├── src/
-│   ├── index.html
-│   ├── package.json
-│   └── vite.config.js
-│
-└── README.md
+`backend/chat_agent.py`
+
+```
+extract_symptoms
+      │
+      ▼
+check_emergency ──── emergency? ──▶ emergency_response ──▶ END   (no LLM on this path)
+      │ no
+      ▼
+check_missing_info ── missing info & rounds < cap? ──▶ ask_questions ──▶ END
+      │ no
+      ▼
+risk_assessment ── Urgency: Emergency? ──▶ emergency_response ──▶ END
+      │ no
+      ▼
+generate_prediction
+      │
+      ▼
+provide_guidance ──▶ END
 ```
 
----
+Three details that matter:
 
-## Tech Stack
+- **The emergency path calls no model.** A deterministic rules layer runs first; if
+  it fires, the graph short-circuits to a hard-coded instruction to seek care.
+- **The clarifying-question cap is server-enforced.** `MAX_CLARIFYING_QUESTIONS`
+  lives in the graph, and the client-supplied counter is clamped, so a safety bound
+  is never client-controlled.
+- **Urgency changes control flow.** `Urgency: Emergency` routes to the hard stop;
+  `Urgent` prevents the guidance prompt from recommending self-care.
 
-### Backend
+## The triage pipeline — 4 nodes
 
-* FastAPI
-* Python
-* LangGraph
-* PostgreSQL
-* Uvicorn
+`backend/langgraph_llm_agents.py`
 
-### Frontend
+```
+normalize_symptoms → specialist_lookup → recommend_specialists → fetch_doctors → END
+```
 
-* React
-* Vite
-* JavaScript
-* CSS
-
-### AI / Workflow
-
-* LLM provider abstraction
-* LangGraph orchestration
-* Prompt-driven symptom analysis
+Only the LLM may pick from the specialties the database returned; a hallucinated
+name is filtered out on the way back.
 
 ---
 
-## Backend Design
+## Provider abstraction
 
-The backend is organized into layers:
+Both the LLM and speech layers sit behind an interface, so nothing outside those
+files imports a vendor SDK.
 
-### `api/`
+**LLM** — `llm/base.py` (ABC) + `llm/factory.py`, selected by `LLM_PROVIDER`:
 
-HTTP route handlers and API entry points.
+- `openai` (default) — `langchain_openai`, `gpt-4.1-mini`
+- `cerebras` — OpenAI-compatible endpoint, `llama-3.3-70b`. Recommended for this
+  app: the pipeline makes up to five sequential calls per turn, so cost and latency
+  dominate. Reuses the installed SDK, so there is no second dependency.
+- `gemini` — `google-generativeai`, `gemini-2.5-flash`
 
-### `services/`
+Adding a fourth OpenAI-compatible vendor is a class with four attributes and one
+line in the factory.
 
-Business logic and orchestration.
+**Voice** — `voice/base.py` + factory, selected by `VOICE_PROVIDER`:
 
-### `repositories/`
+- `webapi` (default) — browser `SpeechRecognition` / `speechSynthesis`. Free, no
+  API key. Server endpoints return **501** by design, which makes the delegation
+  explicit rather than a silent failure.
+- `deepgram` — server-side STT (`nova-2`) and TTS (`aura-asteria-en`)
 
-Database access and query abstraction.
-
-### `providers/`
-
-LLM provider implementations.
-
-### `prompts/`
-
-Prompt templates used by the agent workflow.
-
-### Core modules
-
-* `main.py` — FastAPI application entry point
-* `langgraph_llm_agents.py` — LangGraph workflow and agent coordination
-* `chat_agent.py` — conversational agent logic
-* `db.py` — database connection handling
-* `config.py` — environment and application configuration
-* `models.py` — data schemas and domain models
+The frontend mirrors this in `utils/voiceProvider.ts` with a
+`VoiceProviderAdapter` interface and two implementations.
 
 ---
 
-## Frontend Design
+## Prompts
 
-The frontend provides the user-facing voice interaction layer.
+Nine templates in `backend/prompts/`, loaded by name from disk so they can be
+reviewed in a diff and edited without a deploy.
 
-It includes:
-
-* voice capture
-* transcript display
-* chat-style responses
-* specialist / recommendation display
-* appointment-related UI flows
-
-The frontend is built with **React + Vite** for fast development and a lightweight build pipeline.
+| Prompt | Purpose |
+|---|---|
+| `chat_extract_symptoms` | utterance → symptom list |
+| `chat_check_emergency` | emergency screen (second gate) |
+| `chat_check_missing_info` | which critical field is missing |
+| `chat_ask_questions` | phrase one clarifying question |
+| `chat_risk_assessment` | urgency + confidence |
+| `chat_prediction` | structured JSON prediction |
+| `chat_guidance` | patient-facing guidance |
+| `normalize` | colloquial → clinical terms |
+| `recommend` | pick specialists from the allowed list |
 
 ---
 
-## Getting Started
+## API
+
+Thirteen endpoints. The care journey is six of them:
+
+| # | Endpoint | Auth | Role |
+|---|---|---|---|
+| 1 | `POST /chat` | – | conversational triage |
+| 2 | `POST /run_langgraph` | – | **specialist mapping + doctor discovery** |
+| 3 | `GET /patient-details` | ✅ | discovery context |
+| 4 | `POST /appointments` | ✅ | **booking** |
+| 5 | `POST /payments/create-order` | ✅ | **booking** |
+| 6 | `POST /payments/verify` | ✅ | **booking** |
+
+Supporting: `POST /auth/login`, `POST /auth/register`, `GET /auth/me`,
+`GET /medical-history`, `POST /payments/webhook`, `POST /stt`, `POST /tts`.
+
+`/patient-details` and `/medical-history` take **no** `user_id` parameter —
+identity comes from the bearer token.
+
+---
+
+## Security
+
+- **bcrypt** password hashing via `pgcrypto`; plaintext is never stored.
+- **Signed JWTs** (HS256) using stdlib `hmac`/`hashlib`, with constant-time
+  comparison and one opaque 401 for every failure mode.
+- `JWT_SECRET` is **required at startup** — there is no insecure default.
+- **Payment before booking.** An order's amount is fixed server-side when created,
+  and `/appointments` re-checks that the payment was captured by us. A forged or
+  omitted `payment_id` returns **402**.
+- **No double-booking.** A unique constraint plus a conditional `UPDATE` inside
+  `sp_create_appointment`; a slot taken concurrently returns **409**.
+- Every response carries an `X-Request-ID`; internal errors never leak a traceback.
+
+### Known gaps
+
+- **Not for clinical use.** The red-flag pattern list needs clinical sign-off, and
+  the golden set is small.
+- **PHI in logs and with the LLM vendor.** Symptom text is logged at INFO and sent
+  to the configured provider. Production needs redaction, a BAA and explicit
+  consent.
+- **No rate limiting** on `/chat`, which is an authenticated LLM proxy.
+- **JWTs cannot be revoked** before expiry; a refresh token or denylist is needed.
+- **Appointment booking has no idempotency key**, so a retried request can create a
+  duplicate appointment.
+
+---
+
+## Setup
 
 ### Prerequisites
 
-* Python 3.12+
-* Node.js 18+
-* PostgreSQL
-* Git
+Python 3.12+, Node 18+, PostgreSQL 14+.
 
----
+### Database
 
-## Backend Setup
+```bash
+psql "$DATABASE_URL" -f backend/schema.sql
+```
+
+Idempotent — safe to re-run. Creates the tables, all stored procedures, and seeds
+5 specialties, 29 symptom→specialty mappings, 15 doctors and 14 days of slots.
+
+### Backend
 
 ```bash
 cd backend
-python -m venv venv
-source venv/bin/activate
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env      # then fill it in
+uvicorn main:app --reload
 ```
 
-### Environment Variables
-
-Create a `.env` file in `backend/`:
-
-```env
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=healthcare
-DB_USER=your_user
-DB_PASSWORD=your_password
-
-FRONTEND_ORIGIN=http://localhost:5173
-
-OPENAI_API_KEY=your_openai_key
-GEMINI_API_KEY=your_gemini_key
-```
-
-### Run Backend
+`.env` must set `DATABASE_URL`, `JWT_SECRET` and the key for your chosen
+`LLM_PROVIDER`. Startup fails with an actionable message if any are missing.
 
 ```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+python -c "import secrets; print(secrets.token_urlsafe(48))"   # generate a JWT_SECRET
 ```
 
----
-
-## Frontend Setup
+### Frontend
 
 ```bash
 cd frontend
 npm install
+echo 'VITE_API_BASE_URL=http://localhost:8000' > .env
 npm run dev
 ```
 
-The frontend will typically run at:
-
-```text
-http://localhost:5173
-```
-
 ---
 
-## Database Setup
-
-Set up PostgreSQL and create the required schema before running the application.
-
-Example:
+## Tests
 
 ```bash
-psql -U postgres
+cd backend
+python -m pytest tests -q
 ```
 
-```sql
-CREATE DATABASE healthcare;
-CREATE USER healthcare_user WITH PASSWORD 'your_password';
-GRANT ALL PRIVILEGES ON DATABASE healthcare TO healthcare_user;
+42 tests covering the red-flag layer, the graph routers, and the API surface
+against a real database. The API tests stub the LLM where a model would otherwise
+be needed — which is what the provider abstraction is for.
+
+```bash
+python -m evals.run_eval --offline        # golden set, deterministic layer only
+python -m evals.run_eval --fail-under 0.0 # CI gate on false-negative rate
 ```
 
-Then apply your schema and stored procedures if your current build uses them.
+```bash
+cd frontend && npm run build:check         # tsc --noEmit && vite build
+```
 
 ---
 
-## Typical Flow
+## Project layout
 
-1. User speaks symptoms into the frontend
-2. Speech is converted to text
-3. Transcript is sent to FastAPI
-4. LangGraph processes the input
-5. Symptoms are normalized
-6. Triage logic determines urgency and context
-7. Relevant specialist types are returned
-8. Doctor results are fetched
-9. Appointment flow continues if needed
+```
+backend/
+├── main.py               app, CORS, request-ID middleware, global error handler
+├── config.py             all env config + startup validation
+├── db.py                 bounded psycopg connection pool
+├── schema.sql            tables, stored procedures, seed data
+├── auth.py               JWT issue/verify (stdlib only)
+├── red_flags.py          deterministic emergency rules
+├── chat_agent.py         conversational graph (8 nodes)
+├── langgraph_llm_agents.py  triage graph (4 nodes)
+├── models.py             request/response schemas
+├── api/                  7 routers, HTTP only
+├── services/             triage_service
+├── repositories/         data access, stored procedures only
+├── llm/                  base, factory, openai_compatible, 3 providers, prompts loader
+├── voice/                base, factory, deepgram, webapi
+├── prompts/              9 templates
+├── evals/                golden_cases, run_eval
+└── tests/                red flags, routers, API integration
 
----
-
-## API Endpoints
-
-The exact routes may vary depending on your implementation, but the backend is structured around endpoints such as:
-
-* `POST /chat`
-* `POST /run_langgraph`
-* authentication-related routes
-* doctor lookup routes
-* appointment-related routes
-
----
-
-## Development Notes
-
-This project follows a modular backend architecture to keep AI orchestration, database access, and business logic separated.
-
-That makes it easier to:
-
-* swap LLM providers
-* extend the triage workflow
-* test individual components
-* maintain clean database access
-* evolve the UI independently
-
----
-
-## Important Note
-
-This application is intended to assist with symptom intake and triage-style guidance.
-
-It should not be treated as a substitute for:
-
-* a licensed doctor
-* emergency services
-* formal diagnosis
-* medical treatment decisions
+frontend/src/
+├── pages/                Login, Signup, Dashboard, VoiceAgent
+├── components/VoiceAgent/ VoiceOrb, MessageList, ChatInput, DoctorList
+└── utils/                api.ts (typed client), voiceProvider.ts (adapter)
+```
