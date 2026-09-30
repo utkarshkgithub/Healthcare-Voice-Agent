@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Mail, Lock, ArrowRight, AlertCircle } from 'lucide-react';
 import { Background, Logo } from '../components';
-import { authApi } from '../utils/api';
+import { authApi, ApiError } from '../utils/api';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -27,11 +27,12 @@ export default function Login() {
       if (data.email) localStorage.setItem('user_email', data.email);
       navigate('/voice-agent');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Login failed';
-      if (msg.includes('401')) {
+      if (err instanceof ApiError && err.status === 401) {
         setError('Invalid email or password.');
+      } else if (err instanceof ApiError) {
+        setError(err.message);
       } else {
-        setError(`Could not reach server: ${msg}`);
+        setError('Could not reach the server. Check your connection.');
       }
     } finally {
       setLoading(false);

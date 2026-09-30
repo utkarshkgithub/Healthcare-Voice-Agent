@@ -5,6 +5,105 @@
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+/** Shape of a single FastAPI 422 validation issue. */
+interface ValidationIssue {
+  type?: string;
+  loc?: (string | number)[];
+  msg?: string;
+  ctx?: Record<string, number>;
+}
+
+/** Error carrying the HTTP status, so callers branch on it instead of parsing text. */
+export class ApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+// ─── Error message formatting ─────────────────────────────────────────────────
+// FastAPI returns 422 as a list of validation issues with machine-readable
+// types, which is useful for a developer and useless in a login form. Turn the
+// common ones into a sentence about the field the user actually typed into.
+const FIELD_LABELS: Record<string, string> = {
+  password: 'Password',
+  email: 'Email address',
+  name: 'Full name',
+  message: 'Message',
+  text: 'Text',
+  reason: 'Reason',
+  amount: 'Amount',
+  patient_id: 'Patient',
+  doctor_id: 'Doctor',
+  slot_id: 'Appointment slot',
+  phrases: 'Symptoms',
+};
+
+function describeValidationIssue(issue: ValidationIssue): string | null {
+  const field = issue.loc?.[issue.loc.length - 1];
+  const label = FIELD_LABELS[field] ?? 'This field';
+  const ctx = issue.ctx ?? {};
+
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+switch (issue.type) {
+    case 'string_too_short':
+      return `${label} must be at least ${plural(ctx.min_length ?? 1, 'character')}.`;
+    case 'string_too_long':
+      return `${label} must be at most ${plural(ctx.max_length ?? 0, 'character')}.`;
+    case 'too_short':
+      return `${label} must include at least ${ctx.min_items ?? ctx.min_length}.`;
+    case 'missing':
+      return `${label} is required.`;
+    case 'string_type':
+    case 'int_type':
+    case 'int_parsing':
+    case 'float_parsing':
+    case 'bool_type':
+      return `${label} is not valid.`;
+    case 'value_error':
+      // Pydantic's email validator buries a second, longer sentence in msg;
+      // the short form reads better than either half of it.
+      return field === 'email'
+        ? 'Enter a valid email address.'
+        : `${label} is not valid.`;
+    default:
+      break;
+  }
+
+  return null;
+}
+
+async function readError(res: Response): Promise<string> {
+  let payload: unknown;
+  try {
+    payload = await res.json();
+  } catch {
+    return res.statusText || 'Request failed.';
+  }
+
+  const detail = (payload as { detail?: unknown })?.detail;
+
+  // 422 -> [{ type, loc, msg, ctx }]
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((issue) => describeValidationIssue(issue as ValidationIssue))
+      .filter((m): m is string => Boolean(m));
+    if (messages.length) {
+      // Distinct messages only: repeating "Password is too short" helps nobody.
+      return Array.from(new Set(messages)).join(' ');
+    }
+  }
+
+  // Everything else -> a plain string detail, already human-readable.
+  if (typeof detail === 'string' && detail.trim()) return detail;
+
+  return res.statusText || 'Request failed.';
+}
+
 // ─── Generic fetch wrapper ─────────────────────────────────────────────────────
 async function apiFetch<T>(
   method: 'GET' | 'POST',
@@ -22,8 +121,7 @@ async function apiFetch<T>(
   });
 
   if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`${res.status}: ${text}`);
+    throw new ApiError(res.status, await readError(res));
   }
 
   return res.json();

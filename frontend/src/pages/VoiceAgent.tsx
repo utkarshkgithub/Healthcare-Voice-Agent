@@ -9,7 +9,7 @@ import { MessageList } from '../components/VoiceAgent/MessageList';
 import { ChatInput } from '../components/VoiceAgent/ChatInput';
 import { Message, AgentStatus } from '../types';
 import { voiceProvider } from '../utils/voiceProvider';
-import { chatApi, triageApi, payAndBook, type Doctor } from '../utils/api';
+import { chatApi, triageApi, payAndBook, ApiError, type Doctor } from '../utils/api';
 import { DoctorList } from '../components/VoiceAgent/DoctorList';
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -112,7 +112,7 @@ export default function VoiceAgent() {
       setDoctors(result.doctors || []);
     } catch (err) {
       setErrorMsg(
-        err instanceof Error ? `Doctor lookup failed: ${err.message}` : 'Doctor lookup failed',
+        err instanceof ApiError ? err.message : "Couldn't look up specialists right now.",
       );
     } finally {
       setTriageBusy(false);
@@ -145,8 +145,7 @@ export default function VoiceAgent() {
       // Refresh the list so the booked slot disappears from discovery.
       setDoctors((prev) => prev.filter((d) => d.slot_id !== doctor.slot_id));
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Booking failed';
-      setBookingMsg(message.includes('just taken') ? 'That slot was just taken.' : message);
+      setBookingMsg(err instanceof ApiError ? err.message : 'Booking failed. Please try again.');
     }
   }, [prediction.condition]);
 
@@ -222,8 +221,12 @@ export default function VoiceAgent() {
 
         speakReply(reply);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Network error';
-        setErrorMsg(`Failed to reach AI: ${msg}`);
+        if (err instanceof ApiError) {
+          // Already a human sentence from the API client.
+          setErrorMsg(err.message);
+        } else {
+          setErrorMsg("Couldn't reach the assistant. Check your connection.");
+        }
         setStatus('idle');
       }
     },

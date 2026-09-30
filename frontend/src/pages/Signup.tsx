@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Mail, Lock, User, ArrowRight, AlertCircle } from 'lucide-react';
 import { Background, Logo } from '../components';
-import { authApi } from '../utils/api';
+import { authApi, ApiError } from '../utils/api';
 
 export default function Signup() {
   const [name, setName] = useState('');
@@ -37,11 +37,12 @@ export default function Signup() {
       if (data.email || email) localStorage.setItem('user_email', data.email || email);
       navigate('/voice-agent');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Registration failed';
-      if (msg.includes('400')) {
+      if (err instanceof ApiError && err.status === 409) {
         setError('An account with this email already exists.');
+      } else if (err instanceof ApiError) {
+        setError(err.message);
       } else {
-        setError(`Could not reach server: ${msg}`);
+        setError('Could not reach the server. Check your connection.');
       }
     } finally {
       setLoading(false);
