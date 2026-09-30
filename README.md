@@ -170,13 +170,15 @@ Thirteen endpoints. The care journey is six of them:
 |---|---|---|---|
 | 1 | `POST /chat` | – | conversational triage |
 | 2 | `POST /run_langgraph` | – | **specialist mapping + doctor discovery** |
-| 3 | `GET /patient-details` | ✅ | discovery context |
+| 3 | `GET /patient-details` | ✅ | patient profile on the dashboard |
 | 4 | `POST /appointments` | ✅ | **booking** |
 | 5 | `POST /payments/create-order` | ✅ | **booking** |
 | 6 | `POST /payments/verify` | ✅ | **booking** |
 
 Supporting: `POST /auth/login`, `POST /auth/register`, `GET /auth/me`,
-`GET /medical-history`, `POST /payments/webhook`, `POST /stt`, `POST /tts`.
+`GET /medical-history` (both profile routes render on the dashboard),
+`POST /payments/webhook` (called by Razorpay, not the browser),
+`POST /stt`, `POST /tts` (used when `VOICE_PROVIDER=deepgram`).
 
 `/patient-details` and `/medical-history` take **no** `user_id` parameter —
 identity comes from the bearer token.

@@ -239,6 +239,35 @@ export const appointmentApi = {
     apiFetch<{ message: string; appointment_id: number }>('POST', '/appointments', req),
 };
 
+// ─── Patient profile ──────────────────────────────────────────────────────────
+export interface PatientDetails {
+  id: number;
+  name: string;
+  date_of_birth?: string | null;
+  gender?: string | null;
+  contact_number?: string | null;
+  medical_record_number?: string | null;
+  blood_group?: string | null;
+  marital_status?: string | null;
+}
+
+export interface MedicalHistory {
+  past_diagnoses?: string | null;
+  surgeries?: string | null;
+  hospital_admissions?: string | null;
+  immunization_records?: string | null;
+  family_medical_history?: string | null;
+  lifestyle_factors?: string | null;
+}
+
+export const patientApi = {
+  /** GET /patient-details — identity comes from the bearer token. */
+  details: () => apiFetch<PatientDetails>('GET', '/patient-details'),
+
+  /** GET /medical-history — identity comes from the bearer token. */
+  medicalHistory: () => apiFetch<MedicalHistory>('GET', '/medical-history'),
+};
+
 // ─── Payments (Razorpay) ──────────────────────────────────────────────────────
 export const paymentApi = {
   /** POST /payments/create-order — server fixes the amount. */

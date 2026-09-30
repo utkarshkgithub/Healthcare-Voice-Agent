@@ -5,6 +5,7 @@ import { Mic, MessageSquare, Clock, ChevronRight, Activity, Zap, Shield } from '
 import Navbar from '../components/Layout/Navbar';
 import DarkVeil from '../components/Layout/DarkVeil';
 import SpotlightCard from '../components/Layout/SpotlightCard';
+import { PatientPanel } from '../components/Dashboard/PatientPanel';
 
 interface StoredSession {
   date: string;
@@ -151,6 +152,8 @@ export default function Dashboard() {
             })}
           </div>
         </motion.div>
+
+        <PatientPanel />
 
         {/* Recent sessions — from real localStorage */}
         <motion.div
