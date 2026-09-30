@@ -85,16 +85,36 @@ export default function VoiceAgent() {
   // ─── Speak reply via voiceProvider ───────────────────────────────────────
   const speakReply = useCallback(
     (text: string, onDone?: () => void) => {
+      // TTS off must still leave 'thinking'. Returning early without changing
+      // status is what left the UI stuck on the thinking indicator forever.
       if (!ttsEnabled) {
+        setStatus('idle');
         onDone?.();
         return;
       }
+
       voiceProvider.cancelSpeech();
       setStatus('speaking');
-      voiceProvider.speak(text, () => {
+
+      // speechSynthesis is not dependable about telling us when it finished:
+      // voices can still be loading, cancel() can swallow an utterance, and
+      // Chrome halts long utterances partway without firing onend. Without a
+      // deadline the UI sits in 'speaking' indefinitely.
+      const words = text.trim().split(/\s+/).filter(Boolean).length;
+      const budgetMs = Math.min((words / 2.8) * 1000 + 2500, 60_000);
+
+      let finished = false;
+      const finish = () => {
+        // The watchdog and a late onend can both land; the caller is told once.
+        if (finished) return;
+        finished = true;
+        clearTimeout(watchdog);
         setStatus('idle');
         onDone?.();
-      });
+      };
+
+      const watchdog = setTimeout(finish, budgetMs);
+      voiceProvider.speak(text, finish);
     },
     [ttsEnabled],
   );
