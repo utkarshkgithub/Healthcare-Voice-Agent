@@ -110,6 +110,83 @@ CREATE TABLE IF NOT EXISTS appointments (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- One live appointment per slot. The application already guards this with a
+-- conditional UPDATE; this makes double-booking impossible even if some other
+-- code path writes directly.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_appointment_slot
+    ON appointments (slot_id);
+
+
+-- =============================================================================
+-- CONVERSATIONS AND TRIAGE AUDIT
+-- =============================================================================
+-- Conversation state lives here rather than in the browser. The client used to
+-- own the transcript in a React ref, which meant a reload lost the history and
+-- the server had to trust whatever history the caller sent.
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    closed_at  TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS ix_conversations_user
+    ON conversations (user_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id              BIGSERIAL PRIMARY KEY,
+    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    role            TEXT NOT NULL CHECK (role IN ('patient', 'agent')),
+    content         TEXT NOT NULL,
+    -- Which graph node produced an agent message. NULL for patient messages.
+    node            TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_messages_conversation
+    ON messages (conversation_id, id);
+
+-- One row per triage run. This is the compliance artefact: it answers
+-- "why was this patient escalated?" without archaeology. It also records the
+-- model and prompt version, so a prompt edit cannot silently change clinical
+-- behaviour with no trace.
+CREATE TABLE IF NOT EXISTS triage_decisions (
+    id                  BIGSERIAL PRIMARY KEY,
+    conversation_id     UUID REFERENCES conversations(id) ON DELETE SET NULL,
+    symptom_text        TEXT,
+    urgency             TEXT,
+    is_emergency        BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Which deterministic rules fired, by name, not just a boolean.
+    triggered_red_flags TEXT[],
+    escalated_by        TEXT NOT NULL DEFAULT 'rules'
+                        CHECK (escalated_by IN ('rules', 'llm', 'none')),
+    provider            TEXT,
+    model               TEXT,
+    prompt_version      TEXT,
+    latency_ms          INTEGER,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_decisions_conversation
+    ON triage_decisions (conversation_id, created_at DESC);
+
+-- Short-lived reservation while a patient completes payment, so a slot is not
+-- advertised to two people while both are typing card details.
+CREATE TABLE IF NOT EXISTS slot_holds (
+    slot_id    INTEGER PRIMARY KEY REFERENCES appointment_slots(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+-- Makes a retried booking request safe: the same key returns the original
+-- appointment instead of creating a second one.
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    key            TEXT PRIMARY KEY,
+    user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    appointment_id INTEGER REFERENCES appointments(id) ON DELETE SET NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- =============================================================================
 -- STORED PROCEDURES
@@ -313,13 +390,13 @@ CREATE OR REPLACE FUNCTION sp_capture_payment(
 )
 RETURNS BOOLEAN AS $$
 DECLARE
-    v_found BOOLEAN := FALSE;
+    v_rows INTEGER := 0;
 BEGIN
     UPDATE payments
     SET status = 'captured', razorpay_payment_id = p_payment_id
     WHERE razorpay_order_id = p_order_id AND status <> 'captured';
-    GET DIAGNOSTICS v_found = ROW_COUNT;
-    RETURN v_found;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    RETURN v_rows > 0;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -334,8 +411,161 @@ RETURNS TABLE (
     WHERE p.razorpay_payment_id = p_payment_id;
 $$ LANGUAGE sql;
 
+-- ─── Conversations ─────────────────────────────────────────────────────────
+-- Create a conversation, or return the caller's most recent open one so a
+-- reload resumes rather than starting over.
+CREATE OR REPLACE FUNCTION sp_get_or_create_conversation(p_user_id INTEGER)
+RETURNS UUID AS $$
+DECLARE
+    v_id UUID;
+BEGIN
+    SELECT id INTO v_id
+    FROM conversations
+    WHERE user_id = p_user_id AND closed_at IS NULL
+    ORDER BY started_at DESC
+    LIMIT 1;
+
+    IF v_id IS NULL THEN
+        INSERT INTO conversations (user_id) VALUES (p_user_id) RETURNING id INTO v_id;
+    END IF;
+
+    RETURN v_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION sp_add_message(
+    p_conversation_id UUID,
+    p_role            TEXT,
+    p_content         TEXT,
+    p_node            TEXT DEFAULT NULL
+)
+RETURNS BIGINT AS $$
+    INSERT INTO messages (conversation_id, role, content, node)
+    VALUES (p_conversation_id, p_role, p_content, p_node)
+    RETURNING id;
+$$ LANGUAGE sql;
+
+-- Oldest-first, capped: the model only ever needs the recent window, and an
+-- unbounded transcript is both a cost and an injection surface.
+CREATE OR REPLACE FUNCTION sp_get_conversation_history(
+    p_conversation_id UUID,
+    p_limit            INTEGER DEFAULT 20
+)
+RETURNS TABLE (
+    message_id BIGINT,
+    role       TEXT,
+    content    TEXT,
+    node       TEXT,
+    created_at TIMESTAMPTZ
+) AS $$
+    SELECT id, role, content, node, created_at
+    FROM (
+        SELECT m.id, m.role, m.content, m.node, m.created_at
+        FROM messages m
+        WHERE m.conversation_id = p_conversation_id
+        ORDER BY m.id DESC
+        LIMIT p_limit
+    ) recent
+    ORDER BY recent.id ASC;
+$$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION sp_close_conversation(p_conversation_id UUID)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_rows INTEGER := 0;
+BEGIN
+    UPDATE conversations SET closed_at = now()
+    WHERE id = p_conversation_id AND closed_at IS NULL;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    RETURN v_rows > 0;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ─── Triage audit ──────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION sp_record_triage_decision(
+    p_conversation_id UUID,
+    p_symptom_text    TEXT,
+    p_urgency         TEXT,
+    p_is_emergency    BOOLEAN,
+    p_red_flags       TEXT[],
+    p_escalated_by    TEXT,
+    p_provider        TEXT,
+    p_model           TEXT,
+    p_prompt_version  TEXT
+)
+RETURNS BIGINT AS $$
+    INSERT INTO triage_decisions (
+        conversation_id, symptom_text, urgency, is_emergency,
+        triggered_red_flags, escalated_by, provider, model, prompt_version
+    )
+    VALUES (
+        p_conversation_id, p_symptom_text, p_urgency, p_is_emergency,
+        p_red_flags, p_escalated_by, p_provider, p_model, p_prompt_version
+    )
+    RETURNING id;
+$$ LANGUAGE sql;
+
+-- ─── Slot holds ────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION sp_hold_slot(
+    p_slot_id    INTEGER,
+    p_user_id    INTEGER,
+    p_ttl_seconds INTEGER DEFAULT 600
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_rows INTEGER := 0;
+BEGIN
+    -- Release any hold that has already expired before checking availability.
+    DELETE FROM slot_holds WHERE expires_at < now();
+
+    UPDATE slot_holds
+    SET user_id = p_user_id, expires_at = now() + make_interval(secs => p_ttl_seconds)
+    WHERE slot_id = p_slot_id;
+
+    IF FOUND THEN
+        RETURN FALSE;               -- already held by someone, possibly us
+    END IF;
+
+    INSERT INTO slot_holds (slot_id, user_id, expires_at)
+    SELECT p_slot_id, p_user_id, now() + make_interval(secs => p_ttl_seconds)
+    WHERE EXISTS (
+        SELECT 1 FROM appointment_slots
+        WHERE id = p_slot_id AND is_booked = FALSE
+    )
+    ON CONFLICT (slot_id) DO NOTHING;
+
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    RETURN v_rows > 0;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION sp_release_expired_holds()
+RETURNS INTEGER AS $$
+    WITH released AS (
+        DELETE FROM slot_holds WHERE expires_at < now() RETURNING 1
+    )
+    SELECT count(*)::INTEGER FROM released;
+$$ LANGUAGE sql;
+
+-- ─── Idempotency ───────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION sp_get_idempotent_appointment(p_key TEXT)
+RETURNS INTEGER AS $$
+    SELECT appointment_id FROM idempotency_keys WHERE key = p_key;
+$$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION sp_record_idempotency_key(
+    p_key            TEXT,
+    p_user_id        INTEGER,
+    p_appointment_id INTEGER
+)
+RETURNS VOID AS $$
+    INSERT INTO idempotency_keys (key, user_id, appointment_id)
+    VALUES (p_key, p_user_id, p_appointment_id)
+    ON CONFLICT (key) DO NOTHING;
+$$ LANGUAGE sql;
+
 -- =============================================================================
--- SEED DATA — 5 specialties, doctors, symptom map, and bookable slots
+-- SEED DATA — 7 specialties, doctors, symptom map, and bookable slots
 -- =============================================================================
 -- Safe to re-run: every insert is idempotent.
 
