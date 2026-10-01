@@ -43,8 +43,11 @@ export default function VoiceAgent() {
   const [bookingMsg, setBookingMsg] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const historyRef = useRef<string[]>([]);
   const questionRoundsRef = useRef(0);
+  // The server owns the transcript now; this only identifies which one.
+  const conversationIdRef = useRef<string | null>(
+    () => localStorage.getItem('conversation_id'),
+  );
   const nextIdRef = useRef(2);
   const animFrameRef = useRef<number>(0);
 
@@ -67,6 +70,43 @@ export default function VoiceAgent() {
     cancelAnimationFrame(animFrameRef.current);
     setBarHeights(waveformBars.map(() => 4));
   }, [waveformBars]);
+
+  // ─── Restore the transcript after a reload ──────────────────────────────
+  // History used to live only in a React ref, so a refresh lost the thread.
+  useEffect(() => {
+    const conversationId = conversationIdRef.current;
+    if (!conversationId || !localStorage.getItem('token')) return;
+
+    let cancelled = false;
+    chatApi
+      .history(conversationId)
+      .then(({ messages }) => {
+        if (cancelled || !messages.length) return;
+        setMessages([
+          ...messages.map((m, i) => ({
+            id: 1000 + i,
+            type: m.role === 'patient' ? ('user' as const) : ('agent' as const),
+            text: m.content,
+            timestamp: new Date(m.created_at),
+          })),
+          {
+            id: 1,
+            type: 'agent' as const,
+            text: 'Picking up where you left off — what else would you like to tell me about?',
+            timestamp: new Date(),
+          },
+        ]);
+      })
+      .catch(() => {
+        // A missing or foreign conversation id just starts fresh.
+        conversationIdRef.current = null;
+        localStorage.removeItem('conversation_id');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ─── Scroll to bottom ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -183,17 +223,20 @@ export default function VoiceAgent() {
       };
       setMessages(prev => [...prev, userMsg]);
 
-      const historySnapshot = [...historyRef.current];
-      historyRef.current = [...historyRef.current, `Patient: ${text.trim()}`];
-
       setStatus('thinking');
 
       try {
         const data = await chatApi.send(
           text.trim(),
-          historySnapshot,
           questionRoundsRef.current,
+          conversationIdRef.current,
         );
+
+        // Persist the id so a reload resumes the same conversation.
+        if (data.conversation_id) {
+          conversationIdRef.current = data.conversation_id;
+          localStorage.setItem('conversation_id', data.conversation_id);
+        }
         const reply: string = data.reply || "I'm sorry, I couldn't generate a response.";
 
         // Carry the counter forward or the clarifying-question cap never trips.
@@ -212,11 +255,6 @@ export default function VoiceAgent() {
             data.predicted_condition,
           ];
           if (phrases.length) void findDoctors(phrases);
-        }
-
-        historyRef.current = [...historyRef.current, `Assistant: ${reply}`];
-        if (historyRef.current.length > 20) {
-          historyRef.current = historyRef.current.slice(-20);
         }
 
         const agentMsg: Message = {

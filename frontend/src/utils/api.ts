@@ -165,28 +165,64 @@ export const authApi = {
 // ─── Chat (LangGraph voice agent) ─────────────────────────────────────────────
 export interface ChatResult {
   reply: string;
+  conversation_id: string;
   question_rounds: number;
   predicted_condition: string;
   predicted_additional_symptoms: string[];
   immediate_remedy: string;
   prediction_summary: string;
+  is_emergency: boolean;
+  out_of_scope: boolean;
+  triggered_red_flags: string[];
+  escalated_by: string;
+  urgency: string | null;
+}
+
+export interface StoredMessage {
+  id: number;
+  role: 'patient' | 'agent';
+  content: string;
+  node: string | null;
+  created_at: string;
 }
 
 export const chatApi = {
   /**
    * POST /chat
-   * Sends a message + conversation history to the LangGraph pipeline.
    *
-   * question_rounds MUST be threaded back in on every call: the backend owns
-   * the clarifying-question cap, and a client that keeps resetting it to 0
-   * makes the agent question the patient indefinitely.
+   * History is NOT sent. The server owns the transcript and loads it from the
+   * database, so a reload resumes the conversation and a caller cannot
+   * fabricate prior turns.
+   *
+   * question_rounds MUST still be threaded back in: the backend owns the
+   * clarifying-question cap, and a client that keeps resetting it to 0 makes
+   * the agent question the patient indefinitely.
    */
-  send: (message: string, history: string[] = [], questionRounds = 0) =>
+  send: (message: string, questionRounds = 0, conversationId?: string | null) =>
     apiFetch<ChatResult>('POST', '/chat', {
       message,
-      history,
       question_rounds: questionRounds,
+      ...(conversationId ? { conversation_id: conversationId } : {}),
     }),
+
+  /** GET /chat/{id}/history — restores the thread after a reload. */
+  history: (conversationId: string) =>
+    apiFetch<{ conversation_id: string; messages: StoredMessage[] }>(
+      'GET',
+      `/chat/${conversationId}/history`,
+    ),
+
+  /** GET /chat/decisions/stats — escalation rate, split by rules vs model. */
+  stats: (days = 7) =>
+    apiFetch<{
+      window_days: number;
+      total: number;
+      emergencies: number;
+      urgent: number;
+      escalated_by_rules: number;
+      escalated_by_llm: number;
+      emergency_rate: number;
+    }>('GET', `/chat/decisions/stats?days=${days}`),
 };
 
 // ─── Triage (specialist mapping + doctor discovery) ───────────────────────────
