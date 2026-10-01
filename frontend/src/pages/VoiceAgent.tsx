@@ -45,8 +45,10 @@ export default function VoiceAgent() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const questionRoundsRef = useRef(0);
   // The server owns the transcript now; this only identifies which one.
+  // Read eagerly: useRef has no lazy initialiser, so passing a function here
+  // would store the function as the value and it would be truthy.
   const conversationIdRef = useRef<string | null>(
-    () => localStorage.getItem('conversation_id'),
+    localStorage.getItem('conversation_id'),
   );
   const nextIdRef = useRef(2);
   const animFrameRef = useRef<number>(0);
@@ -378,13 +380,13 @@ export default function VoiceAgent() {
       </div>
       <Navbar />
 
-      <div className="flex-1 max-w-4xl w-full mx-auto px-4 py-6 flex flex-col gap-6">
+      <div className="flex-1 w-full mx-auto px-4 py-6 max-w-6xl flex flex-col">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="flex items-center justify-between"
+          className="flex items-center justify-between mb-6"
         >
           <div>
             <h1 className="text-3xl font-semibold text-gradient">AI Health Assistant</h1>
@@ -436,32 +438,40 @@ export default function VoiceAgent() {
           )}
         </AnimatePresence>
 
-        <VoiceOrb
-          status={status}
-          speechSupported={speechSupported}
-          toggleMic={toggleMic}
-          waveformBars={waveformBars}
-          barHeights={barHeights}
-          interimTranscript={interimTranscript}
-        />
-
-        <div className="card-glass rounded-2xl flex flex-col overflow-hidden flex-1 min-h-0" style={{ maxHeight: '420px' }}>
-          <MessageList messages={messages} status={status} messagesEndRef={messagesEndRef} />
-          <ChatInput
-            inputText={inputText}
-            setInputText={setInputText}
-            handleTextSend={handleTextSend}
-            isBusy={isBusy}
-          />
-
-          <div className="mx-auto w-full max-w-2xl px-4 pb-6">
-            <DoctorList
-              doctors={doctors}
-              busy={triageBusy}
-              message={bookingMsg}
-              prediction={prediction}
-              onBook={handleBook}
+        <div className="flex-1 min-h-0 flex flex-col md:flex-row md:gap-6 lg:gap-8">
+          {/* Left rail — the voice interface */}
+          <div className="md:w-64 lg:w-80 xl:w-96 md:shrink-0 flex justify-center items-start md:items-center">
+            <VoiceOrb
+              status={status}
+              speechSupported={speechSupported}
+              toggleMic={toggleMic}
+              waveformBars={waveformBars}
+              barHeights={barHeights}
+              interimTranscript={interimTranscript}
             />
+          </div>
+
+          {/* Right — the conversation */}
+          <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-4 mt-6 md:mt-0">
+            <div className="card-glass rounded-2xl flex flex-col overflow-hidden flex-1 min-h-0 max-h-[420px] lg:max-h-none">
+              <MessageList messages={messages} status={status} messagesEndRef={messagesEndRef} />
+              <ChatInput
+                inputText={inputText}
+                setInputText={setInputText}
+                handleTextSend={handleTextSend}
+                isBusy={isBusy}
+              />
+            </div>
+
+            <div className="shrink-0 max-h-56 overflow-y-auto">
+              <DoctorList
+                doctors={doctors}
+                busy={triageBusy}
+                message={bookingMsg}
+                prediction={prediction}
+                onBook={handleBook}
+              />
+            </div>
           </div>
         </div>
       </div>

@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:check": "tsc --noEmit && vite build",
+    "build:check": "tsc -b --force && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc -b --force"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.2",

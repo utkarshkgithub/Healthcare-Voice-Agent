@@ -43,7 +43,8 @@ const FIELD_LABELS: Record<string, string> = {
 };
 
 function describeValidationIssue(issue: ValidationIssue): string | null {
-  const field = issue.loc?.[issue.loc.length - 1];
+  const loc = issue.loc ?? [];
+  const field = loc.length ? String(loc[loc.length - 1]) : '';
   const label = FIELD_LABELS[field] ?? 'This field';
   const ctx = issue.ctx ?? {};
 

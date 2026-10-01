@@ -7,28 +7,28 @@ import Logo from './Logo';
 
 export default function Navbar() {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [userEmail] = useState(() => localStorage.getItem('user_email') || 'patient@healthai.com');
+  const [userEmail, setUserEmail] = useState(
+    () => localStorage.getItem('user_email') || 'patient@healthai.com',
+  );
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
-    const userId = localStorage.getItem('user_id');
-    if (userId) {
-      authApi.getMe(userId)
-        .then((data) => {
-          if (data.name) {
-            setUserName(data.name);
-            localStorage.setItem('user_name', data.name);
-          }
-          if (data.email) {
-            setUserEmail(data.email);
-            localStorage.setItem('user_email', data.email);
-          }
-        })
-        .catch((err) => {
-          console.error('Failed to fetch profile details:', err);
-        });
-    }
+    // Identity comes from the bearer token; the route takes no argument.
+    if (!localStorage.getItem('token')) return;
+
+    authApi
+      .getMe()
+      .then((data) => {
+        if (data.name) localStorage.setItem('user_name', data.name);
+        if (data.email) {
+          setUserEmail(data.email);
+          localStorage.setItem('user_email', data.email);
+        }
+      })
+      .catch(() => {
+        // Signed out or offline: the navbar still renders, just without a name.
+      });
   }, []);
 
   const handleLogout = () => {
@@ -46,8 +46,8 @@ export default function Navbar() {
 
   return (
     <nav className="sticky top-0 z-50 border-b border-white/[0.06] backdrop-blur-xl bg-background-base/80">
-      <div className="max-w-7xl mx-auto px-6 py-4">
-        <div className="flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+        <div className="flex items-center justify-between gap-2">
           {/* Logo */}
           <Logo size="md" linkTo="/dashboard" />
 
@@ -62,16 +62,16 @@ export default function Navbar() {
                   key={item.path}
                   to={item.path}
                   className={`
-                    relative px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
-                    flex items-center gap-2
+                    relative px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
+                    flex items-center gap-2 shrink-0
                     ${active 
                       ? 'text-foreground bg-white/[0.08]' 
                       : 'text-foreground-muted hover:text-foreground hover:bg-white/[0.05]'
                     }
                   `}
                 >
-                  <Icon className="w-4 h-4" />
-                  {item.label}
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span className="hidden sm:inline">{item.label}</span>
                   {active && (
                     <motion.div
                       layoutId="activeNav"
