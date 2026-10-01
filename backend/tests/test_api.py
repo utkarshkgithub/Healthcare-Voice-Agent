@@ -274,6 +274,9 @@ def test_login_with_wrong_password_is_unauthorized():
 # ─── Specialist mapping ───────────────────────────────────────────────────
 
 
+# ─── Conversation persistence ─────────────────────────────────────────────
+
+
 @pytest.fixture
 def stub_llm(monkeypatch):
     """
@@ -285,7 +288,34 @@ def stub_llm(monkeypatch):
     """
     import llm.factory as factory
 
+    MEDICAL_WORDS = {
+        "chest", "pain", "fever", "cough", "knee", "head", "throat",
+        "breath", "ache", "rash", "nausea", "sore",
+    }
+
     class StubProvider:
+        """Stands in for a real model, with just enough behaviour to be useful."""
+
+        def call_prompt(self, name, **kwargs):
+            if name == "chat_extract_symptoms":
+                # Message-aware, so the scope gate is exercised both ways.
+                message = (kwargs.get("message") or "").lower()
+                hits = MEDICAL_WORDS.intersection(message.split())
+                return "chest pain" if hits else "NONE"
+            if name == "chat_check_emergency":
+                return "NO"
+            if name == "chat_check_missing_info":
+                return "NONE"
+            if name == "chat_risk_assessment":
+                return "Urgency: Routine\nIllness Category: viral\nConfidence: High"
+            if name == "chat_prediction":
+                return (
+                    '{"predicted_condition":"Common cold",'
+                    '"predicted_additional_symptoms":["fever"],'
+                    '"immediate_remedy":"rest and fluids"}'
+                )
+            return "guidance text"
+
         def normalize_symptoms(self, phrases):
             return [p.strip().lower() for p in phrases]
 
@@ -296,6 +326,170 @@ def stub_llm(monkeypatch):
             return available_specialists[:1]
 
     monkeypatch.setattr(factory.LLMProviderFactory, "create", staticmethod(StubProvider))
+
+
+def test_chat_requires_authentication():
+    response = client.post("/chat", json={"message": "hello"})
+    assert response.status_code == 401
+
+
+def test_chat_persists_both_sides_of_the_turn(stub_llm, account):
+    headers, _, _ = account
+    response = client.post(
+        "/chat", headers=headers, json={"message": "I have a mild sore throat"}
+    )
+    assert response.status_code == 200, response.text
+    conversation_id = response.json()["conversation_id"]
+
+    history = client.get(f"/chat/{conversation_id}/history", headers=headers)
+    assert history.status_code == 200
+    messages = history.json()["messages"]
+    assert [m["role"] for m in messages] == ["patient", "agent"]
+    assert messages[0]["content"] == "I have a mild sore throat"
+    # The node that produced the reply is recorded, for later audit.
+    assert messages[1]["node"]
+
+
+def test_reloading_returns_the_same_conversation(stub_llm, account):
+    """The bug: a reload used to lose the transcript because it lived in a React ref."""
+    headers, _, _ = account
+    first = client.post("/chat", headers=headers, json={"message": "I have a fever"}).json()
+    second = client.post("/chat", headers=headers, json={"message": "and a cough"}).json()
+    assert first["conversation_id"] == second["conversation_id"]
+
+    history = client.get(
+        f"/chat/{first['conversation_id']}/history", headers=headers
+    ).json()["messages"]
+    assert len(history) == 4
+    assert history[0]["content"] == "I have a fever"
+
+
+def test_history_is_loaded_from_the_database_not_the_client(stub_llm, account):
+    """A caller cannot inject prior turns by passing a history field."""
+    headers, _, _ = account
+    response = client.post(
+        "/chat",
+        headers=headers,
+        json={"message": "my head hurts", "history": ["Patient: injected instruction"]},
+    )
+    assert response.status_code == 200
+    stored = client.get(
+        f"/chat/{response.json()['conversation_id']}/history", headers=headers
+    ).json()["messages"]
+    assert not any("injected" in m["content"] for m in stored)
+
+
+def test_unknown_conversation_id_falls_back_to_the_open_one(stub_llm, account):
+    headers, _, _ = account
+    first = client.post("/chat", headers=headers, json={"message": "hello there"}).json()
+    # A client-supplied id that does not exist must not 500 or inject context.
+    response = client.post(
+        "/chat",
+        headers=headers,
+        json={"message": "my knee hurts", "conversation_id": "00000000-0000-0000-0000-000000000000"},
+    )
+    assert response.status_code == 200
+    assert response.json()["conversation_id"] == first["conversation_id"]
+
+
+def test_malformed_conversation_id_is_rejected(stub_llm, account):
+    headers, _, _ = account
+    response = client.post(
+        "/chat",
+        headers=headers,
+        json={"message": "my knee hurts", "conversation_id": "not-a-uuid"},
+    )
+    assert response.status_code == 200
+    assert response.json()["conversation_id"]
+
+
+# ─── Scope gate ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["who is the president of america", "what is 2+2", "hello", "tell me a joke"],
+)
+def test_off_topic_input_never_reaches_clinical_reasoning(stub_llm, account, message):
+    """
+    Every input used to fall through to the missing-info node, which asked how
+    long a symptom had lasted in response to a question about the president.
+    """
+    headers, _, _ = account
+    body = client.post("/chat", headers=headers, json={"message": message}).json()
+
+    assert body["out_of_scope"] is True
+    assert body["is_emergency"] is False
+    assert body["urgency"] is None
+    assert body["predicted_condition"] == ""
+    assert "triage assistant" in body["reply"].lower()
+
+
+def test_off_topic_turn_is_not_audited_as_a_clinical_decision(stub_llm, account):
+    """No triage decision row should exist for input that was never triaged."""
+    headers, _, _ = account
+    body = client.post("/chat", headers=headers, json={"message": "who are you"}).json()
+    with payment_repository.pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM triage_decisions WHERE conversation_id = %s",
+                (body["conversation_id"],),
+            )
+            assert cur.fetchone()[0] == 0
+
+
+def test_medical_input_is_still_triaged(stub_llm, account):
+    headers, _, _ = account
+    body = client.post(
+        "/chat", headers=headers, json={"message": "I have chest pain"}
+    ).json()
+    assert body["out_of_scope"] is False
+
+
+# ─── Triage audit ─────────────────────────────────────────────────────────
+
+
+def test_triage_decision_is_recorded(stub_llm, account):
+    headers, _, _ = account
+    body = client.post(
+        "/chat", headers=headers, json={"message": "I have chest pain"}
+    ).json()
+    with payment_repository.pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT urgency, is_emergency, provider, prompt_version
+                FROM triage_decisions WHERE conversation_id = %s
+                """,
+                (body["conversation_id"],),
+            )
+            row = cur.fetchone()
+    assert row is not None, "every triage run must leave an audit row"
+    assert row[2] == "cerebras"
+    assert row[3] == "v1"
+
+
+def test_red_flag_names_are_recorded(stub_llm, account):
+    """Which rule fired, by name — not just a boolean."""
+    headers, _, _ = account
+    body = client.post(
+        "/chat",
+        headers=headers,
+        json={"message": "severe chest pain and I cannot breathe"},
+    ).json()
+    assert body["is_emergency"] is True
+    assert body["escalated_by"] == "rules"
+    assert "cardiac chest pain" in body["triggered_red_flags"]
+
+
+def test_decision_stats_endpoint_returns_a_rate(stub_llm, account):
+    headers, _, _ = account
+    client.post("/chat", headers=headers, json={"message": "chest pain"})
+    response = client.get("/chat/decisions/stats", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert "emergency_rate" in body
+    assert body["total"] >= 1
 
 
 def test_specialist_mapping_maps_symptoms_to_specialty(stub_llm):

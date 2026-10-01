@@ -15,9 +15,38 @@ from chat_agent import (
     route_after_emergency_check,
     route_after_missing_info_check,
     route_after_risk_assessment,
+    route_after_symptom_extraction,
     _parse_prediction_payload,
     _parse_urgency,
 )
+
+
+# ─── Scope gate ──────────────────────────────────────────────────────────
+# The regression: every input used to fall through to the missing-info node,
+# which asked about symptom duration in response to "who is the president of
+# america" and "what is 2+2".
+
+def test_no_symptoms_is_out_of_scope():
+    assert route_after_symptom_extraction({"symptoms": "NONE"}) == "out_of_scope"
+
+
+def test_blank_symptoms_is_out_of_scope():
+    assert route_after_symptom_extraction({"symptoms": ""}) == "out_of_scope"
+    assert route_after_symptom_extraction({"symptoms": "   "}) == "out_of_scope"
+    assert route_after_symptom_extraction({"symptoms": "none"}) == "out_of_scope"
+    assert route_after_symptom_extraction({}) == "out_of_scope"
+
+
+def test_real_symptoms_stay_in_scope():
+    for symptoms in ("chest pain", "fever, cough", "NONE BUT REAL"):
+        if symptoms.upper() == "NONE" or symptoms.strip().upper() == "NONE":
+            continue
+        assert route_after_symptom_extraction({"symptoms": symptoms}) == "in_scope"
+
+
+def test_symptom_list_containing_none_word_is_in_scope():
+    # "None" as a standalone token only counts when it is the whole answer.
+    assert route_after_symptom_extraction({"symptoms": "chest pain, none"}) == "in_scope"
 
 
 def test_emergency_check_routes_to_emergency():

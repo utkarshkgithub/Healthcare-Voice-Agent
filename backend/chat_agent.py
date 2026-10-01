@@ -31,9 +31,13 @@ MAX_CLARIFYING_QUESTIONS = 1
 class ChatAgentState(TypedDict):
     message: str
     history: List[str]
+    conversation_id: str
     symptoms: str
     is_emergency: bool
     triggered_red_flags: List[str]
+    out_of_scope: bool
+    escalated_by: str
+    confidence: float
     missing_info: str
     risk_assessment: str
     urgency: str
@@ -101,6 +105,42 @@ def extract_symptoms_node(state: ChatAgentState) -> dict:
     return {"symptoms": symptoms}
 
 
+def route_after_symptom_extraction(state: ChatAgentState) -> str:
+    """
+    Scope gate.
+
+    If the extractor found no medical symptom, this is not a triage case and
+    must not continue into clinical reasoning. Previously every input fell
+    through to the missing-info node, which helpfully asked how long a symptom
+    had been going on in response to "who is the president of america" and
+    "what is 2+2".
+    """
+    symptoms = (state.get("symptoms") or "").strip()
+    if not symptoms or symptoms.upper() == "NONE":
+        return "out_of_scope"
+    return "in_scope"
+
+
+def out_of_scope_node(state: ChatAgentState) -> dict:
+    """
+    Terminal for non-medical input.
+
+    No urgency assessment, no prediction, no red-flag evaluation — there is no
+    clinical question to reason about. The reply is a fixed redirect so the
+    model's own words cannot accidentally imply a clinical judgement.
+    """
+    logger.info("[chat_agent] Out-of-scope input, terminating without triage")
+    return {
+        "out_of_scope": True,
+        "urgency": None,
+        "final_reply": (
+            "I'm a symptom triage assistant, so I can only help with health "
+            "concerns. If you're feeling unwell, describe your symptoms and "
+            "I'll help you work out how urgently you should be seen."
+        ),
+    }
+
+
 def check_emergency_node(state: ChatAgentState) -> dict:
     logger.info("[chat_agent] Checking emergency red flags")
 
@@ -113,7 +153,11 @@ def check_emergency_node(state: ChatAgentState) -> dict:
         logger.warning(
             f"[chat_agent] Deterministic red flag detected: {rule_flags}"
         )
-        return {"is_emergency": True, "triggered_red_flags": rule_flags}
+        return {
+            "is_emergency": True,
+            "triggered_red_flags": rule_flags,
+            "escalated_by": "rules",
+        }
 
     # No rule fired — the model's judgement is the deciding signal.
     llm = LLMProviderFactory.create()
@@ -121,7 +165,13 @@ def check_emergency_node(state: ChatAgentState) -> dict:
 
     is_emergency = "YES" in result.upper()
     logger.info(f"[chat_agent] Emergency: {is_emergency}")
-    return {"is_emergency": is_emergency, "triggered_red_flags": []}
+    return {
+        "is_emergency": is_emergency,
+        "triggered_red_flags": [],
+        # Recording who escalated is what makes the audit trail useful: a rise
+        # in model-driven escalations is a prompt signal, not just a number.
+        "escalated_by": "llm" if is_emergency else "none",
+    }
 
 
 def emergency_response_node(state: ChatAgentState) -> dict:
@@ -300,6 +350,7 @@ def build_chat_graph():
     
     # Add nodes
     builder.add_node("extract_symptoms_node", extract_symptoms_node)
+    builder.add_node("out_of_scope_node", out_of_scope_node)
     builder.add_node("check_emergency_node", check_emergency_node)
     builder.add_node("emergency_response_node", emergency_response_node)
     builder.add_node("check_missing_info_node", check_missing_info_node)
@@ -312,7 +363,16 @@ def build_chat_graph():
     builder.set_entry_point("extract_symptoms_node")
     
     # Define edges
-    builder.add_edge("extract_symptoms_node", "check_emergency_node")
+    # Scope gate first: no clinical reasoning on non-medical input.
+    builder.add_conditional_edges(
+        "extract_symptoms_node",
+        route_after_symptom_extraction,
+        {
+            "out_of_scope": "out_of_scope_node",
+            "in_scope": "check_emergency_node"
+        }
+    )
+    builder.add_edge("out_of_scope_node", END)
     
     builder.add_conditional_edges(
         "check_emergency_node",
