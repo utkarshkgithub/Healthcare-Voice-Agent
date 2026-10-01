@@ -3,7 +3,7 @@ Tests for capability grounding.
 
 The regression: asked to book an appointment, the model replied "I can't book
 it directly here, but please call your clinic" — while the application books
-appointments through a payment flow. It was hallucinating a limitation it had
+appointments in-app. It was hallucinating a limitation it had
 no way of knowing about.
 """
 import sys

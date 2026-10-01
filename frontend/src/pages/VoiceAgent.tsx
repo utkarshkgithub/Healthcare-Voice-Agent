@@ -9,7 +9,7 @@ import { MessageList } from '../components/VoiceAgent/MessageList';
 import { ChatInput } from '../components/VoiceAgent/ChatInput';
 import { Message, AgentStatus } from '../types';
 import { voiceProvider } from '../utils/voiceProvider';
-import { chatApi, triageApi, payAndBook, ApiError, type Doctor } from '../utils/api';
+import { appointmentApi, chatApi, triageApi, ApiError, type Doctor } from '../utils/api';
 import { DoctorList } from '../components/VoiceAgent/DoctorList';
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -192,23 +192,24 @@ export default function VoiceAgent() {
       `Booking with ${doctor.name} on ${doctor.next_available_date} at ${doctor.start_time}…`,
     );
     try {
-      const result = await payAndBook(
-        doctor,
-        Number(patientId),
-        prediction.condition || 'General consultation',
-      );
-      if (!result) {
-        setBookingMsg('Payment cancelled. The slot is still available.');
-        return;
+        await appointmentApi.book(
+          {
+            patient_id: Number(patientId),
+            doctor_id: doctor.doctor_id,
+            slot_id: doctor.slot_id,
+            reason: prediction.condition || 'General consultation',
+          },
+          // Stable per slot, so a double-click or a retry is one booking.
+          `slot-${doctor.slot_id}`,
+        );
+        setBookingMsg(
+          `Booked with ${doctor.name} on ${doctor.next_available_date} at ${doctor.start_time}.`,
+        );
+        // Refresh the list so the booked slot disappears from discovery.
+        setDoctors((prev) => prev.filter((d) => d.slot_id !== doctor.slot_id));
+      } catch (err) {
+        setBookingMsg(err instanceof ApiError ? err.message : 'Booking failed. Please try again.');
       }
-      setBookingMsg(
-        `Booked with ${doctor.name} on ${doctor.next_available_date} at ${doctor.start_time}.`,
-      );
-      // Refresh the list so the booked slot disappears from discovery.
-      setDoctors((prev) => prev.filter((d) => d.slot_id !== doctor.slot_id));
-    } catch (err) {
-      setBookingMsg(err instanceof ApiError ? err.message : 'Booking failed. Please try again.');
-    }
   }, [prediction.condition]);
 
   // ─── Send message to real /chat endpoint ─────────────────────────────────

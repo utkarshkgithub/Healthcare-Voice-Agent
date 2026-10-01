@@ -13,9 +13,6 @@ google-generativeai
 psycopg[binary]
 psycopg_pool
 
-# ─── Payments ─────────────────────────────────────────────────────────────────
-razorpay
-
 # ─── Config & voice ───────────────────────────────────────────────────────────
 python-dotenv
 requests

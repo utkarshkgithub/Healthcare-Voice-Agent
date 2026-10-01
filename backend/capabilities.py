@@ -3,7 +3,7 @@ Capability grounding.
 
 The model must never describe what the system can do. Asked to book an
 appointment it replied "I can't book it directly here, but please call your
-clinic" — while the application books appointments through a payment flow.
+clinic" — while the application books appointments in-app.
 
 That is a hallucination about system state, which is the same failure class as
 the IDOR: the model asserting something it cannot observe. The fix is not a

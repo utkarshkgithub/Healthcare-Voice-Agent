@@ -53,7 +53,6 @@ FastAPI  (main.py — middleware, CORS, request IDs, routers)
   ├── /chat          → chat_agent.build_chat_graph()      8 nodes, 2 routers
   ├── /run_langgraph → triage_service.run_triage()        4 nodes, linear
   ├── /auth /patient-details /medical-history /appointments
-  ├── /payments/{create-order,verify,webhook}
   └── /stt /tts      → voice/factory.py
           │
    ┌──────┴─────────┐
@@ -164,7 +163,7 @@ reviewed in a diff and edited without a deploy.
 
 ## API
 
-Thirteen endpoints. The care journey is six of them:
+Twelve endpoints. The care journey is four of them:
 
 | # | Endpoint | Auth | Role |
 |---|---|---|---|
@@ -172,12 +171,9 @@ Thirteen endpoints. The care journey is six of them:
 | 2 | `POST /run_langgraph` | – | **specialist mapping + doctor discovery** |
 | 3 | `GET /patient-details` | ✅ | patient profile on the dashboard |
 | 4 | `POST /appointments` | ✅ | **booking** |
-| 5 | `POST /payments/create-order` | ✅ | **booking** |
-| 6 | `POST /payments/verify` | ✅ | **booking** |
 
 Supporting: `POST /auth/login`, `POST /auth/register`, `GET /auth/me`,
 `GET /medical-history` (both profile routes render on the dashboard),
-`POST /payments/webhook` (called by Razorpay, not the browser),
 `POST /stt`, `POST /tts` (used when `VOICE_PROVIDER=deepgram`).
 
 `/patient-details` and `/medical-history` take **no** `user_id` parameter —
@@ -191,11 +187,11 @@ identity comes from the bearer token.
 - **Signed JWTs** (HS256) using stdlib `hmac`/`hashlib`, with constant-time
   comparison and one opaque 401 for every failure mode.
 - `JWT_SECRET` is **required at startup** — there is no insecure default.
-- **Payment before booking.** An order's amount is fixed server-side when created,
-  and `/appointments` re-checks that the payment was captured by us. A forged or
-  omitted `payment_id` returns **402**.
 - **No double-booking.** A unique constraint plus a conditional `UPDATE` inside
   `sp_create_appointment`; a slot taken concurrently returns **409**.
+- **Idempotent booking.** `POST /appointments` honours an `Idempotency-Key`
+  header, so a client that times out and retries gets the original appointment
+  rather than booking twice.
 - Every response carries an `X-Request-ID`; internal errors never leak a traceback.
 
 ### Known gaps
@@ -290,7 +286,7 @@ backend/
 ├── chat_agent.py         conversational graph (8 nodes)
 ├── langgraph_llm_agents.py  triage graph (4 nodes)
 ├── models.py             request/response schemas
-├── api/                  7 routers, HTTP only
+├── api/                  6 routers, HTTP only
 ├── services/             triage_service
 ├── repositories/         data access, stored procedures only
 ├── llm/                  base, factory, openai_compatible, 3 providers, prompts loader

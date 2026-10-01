@@ -12,6 +12,20 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- =============================================================================
+-- REMOVED OBJECTS
+-- =============================================================================
+-- Payments were handled by a payment gateway and have been removed: booking is
+-- now direct. These drops migrate a database that still has the old objects,
+-- so re-running this file against an existing deployment actually cleans up.
+DROP FUNCTION IF EXISTS sp_record_payment_order(TEXT, INTEGER, TEXT);
+DROP FUNCTION IF EXISTS sp_capture_payment(TEXT, TEXT);
+DROP FUNCTION IF EXISTS sp_get_payment(TEXT);
+
+-- CASCADE is required because appointments.payment_id referenced payments(id).
+ALTER TABLE IF EXISTS appointments DROP COLUMN IF EXISTS payment_id;
+DROP TABLE IF EXISTS payments CASCADE;
+
 
 -- =============================================================================
 -- TABLES
@@ -89,23 +103,12 @@ CREATE INDEX IF NOT EXISTS ix_slots_lookup
     ON appointment_slots (doctor_id, slot_date)
     WHERE is_booked = FALSE;
 
-CREATE TABLE IF NOT EXISTS payments (
-    id           SERIAL PRIMARY KEY,
-    razorpay_order_id   TEXT UNIQUE,
-    razorpay_payment_id TEXT,
-    amount       INTEGER NOT NULL,
-    currency     TEXT NOT NULL DEFAULT 'INR',
-    status       TEXT NOT NULL DEFAULT 'created',
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
 CREATE TABLE IF NOT EXISTS appointments (
     id          SERIAL PRIMARY KEY,
     patient_id  INTEGER NOT NULL REFERENCES patients(id),
     doctor_id   INTEGER NOT NULL REFERENCES doctors(id),
     slot_id     INTEGER NOT NULL REFERENCES appointment_slots(id),
     reason      TEXT,
-    payment_id  INTEGER REFERENCES payments(id),
     status      TEXT NOT NULL DEFAULT 'confirmed',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -171,8 +174,8 @@ CREATE TABLE IF NOT EXISTS triage_decisions (
 CREATE INDEX IF NOT EXISTS ix_decisions_conversation
     ON triage_decisions (conversation_id, created_at DESC);
 
--- Short-lived reservation while a patient completes payment, so a slot is not
--- advertised to two people while both are typing card details.
+-- Short-lived reservation of a slot while the patient confirms, so a slot is not
+-- advertised to two people while both are filling in the booking form.
 CREATE TABLE IF NOT EXISTS slot_holds (
     slot_id    INTEGER PRIMARY KEY REFERENCES appointment_slots(id) ON DELETE CASCADE,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -328,8 +331,7 @@ CREATE OR REPLACE FUNCTION sp_create_appointment(
     p_patient_id INTEGER,
     p_doctor_id  INTEGER,
     p_slot_id    INTEGER,
-    p_reason     TEXT,
-    p_payment_id TEXT DEFAULT NULL
+    p_reason     TEXT
 )
 RETURNS INTEGER AS $$
 DECLARE
@@ -344,10 +346,8 @@ BEGIN
         RAISE EXCEPTION 'Slot % is no longer available', p_slot_id;
     END IF;
 
-INSERT INTO appointments (patient_id, doctor_id, slot_id, reason, payment_id)
-    SELECT p.id, p_doctor_id, s.id, p_reason,
-           CASE WHEN p_payment_id IS NULL THEN NULL
-                ELSE (SELECT id FROM payments WHERE razorpay_payment_id = p_payment_id)
+    INSERT INTO appointments (patient_id, doctor_id, slot_id, reason)
+    SELECT p.id, p_doctor_id, s.id, p_reason
            END
     FROM patients p
     JOIN appointment_slots s ON s.id = p_slot_id AND s.doctor_id = p_doctor_id
@@ -362,54 +362,6 @@ INSERT INTO appointments (patient_id, doctor_id, slot_id, reason, payment_id)
 END;
 $$ LANGUAGE plpgsql;
 
-
--- Payments: record an order when it is created, so verification can be
--- matched against an amount the client cannot choose.
-CREATE OR REPLACE FUNCTION sp_record_payment_order(
-    p_order_id TEXT,
-    p_amount   INTEGER,
-    p_currency TEXT DEFAULT 'INR'
-)
-RETURNS INTEGER AS $$
-DECLARE
-    v_id INTEGER;
-BEGIN
-    INSERT INTO payments (razorpay_order_id, amount, currency, status)
-    VALUES (p_order_id, p_amount, p_currency, 'created')
-    ON CONFLICT (razorpay_order_id) DO UPDATE SET amount = EXCLUDED.amount
-    RETURNING id INTO v_id;
-    RETURN v_id;
-END;
-$$ LANGUAGE plpgsql;
-
--- Mark an order captured. Returns FALSE when the order is unknown, which is
--- how a verified signature for an order we never created gets rejected.
-CREATE OR REPLACE FUNCTION sp_capture_payment(
-    p_order_id   TEXT,
-    p_payment_id TEXT
-)
-RETURNS BOOLEAN AS $$
-DECLARE
-    v_rows INTEGER := 0;
-BEGIN
-    UPDATE payments
-    SET status = 'captured', razorpay_payment_id = p_payment_id
-    WHERE razorpay_order_id = p_order_id AND status <> 'captured';
-    GET DIAGNOSTICS v_rows = ROW_COUNT;
-    RETURN v_rows > 0;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION sp_get_payment(p_payment_id TEXT)
-RETURNS TABLE (
-    payment_id TEXT,
-    amount     INTEGER,
-    status     TEXT
-) AS $$
-    SELECT p.razorpay_payment_id, p.amount, p.status
-    FROM payments p
-    WHERE p.razorpay_payment_id = p_payment_id;
-$$ LANGUAGE sql;
 
 -- ─── Conversations ─────────────────────────────────────────────────────────
 -- Create a conversation, or return the caller's most recent open one so a

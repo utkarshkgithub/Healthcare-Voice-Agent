@@ -1,10 +1,10 @@
 """
 Appointments API routes — /appointments
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from auth import get_current_user
 from models import AppointmentRequest
-from repositories import appointment_repository, patient_repository, payment_repository
+from repositories import appointment_repository, patient_repository
 import logging
 
 router = APIRouter(tags=["appointments"])
@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 def create_appointment(
     req: AppointmentRequest,
     user_id: int = Depends(get_current_user),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ):
     """
     Books a slot for the authenticated patient.
@@ -22,6 +23,9 @@ def create_appointment(
     The caller must not be able to book on someone else's behalf: the patient
     is resolved from the token, and a mismatch with the request body is
     rejected rather than trusted.
+
+    An Idempotency-Key makes a retry safe. Without one, a client that times
+    out and retries creates two appointments for one slot.
     """
     patient_id = patient_repository.get_patient_id_by_user(user_id)
     if not patient_id:
@@ -31,20 +35,17 @@ def create_appointment(
             status_code=403, detail="Cannot book an appointment for another patient."
         )
 
-    # Payment must already be captured for this slot's fee. Booking used to
-    # accept any payment_id string, or none at all, so a client could simply
-    # skip the payment step entirely.
-    if not req.payment_id:
-        raise HTTPException(status_code=402, detail="Payment required to confirm booking.")
-
-    payment = payment_repository.get_payment(req.payment_id)
-    if not payment or payment["status"] != "captured":
-        logger.warning(f"[appointments] Rejected unverified payment {req.payment_id}")
-        raise HTTPException(status_code=402, detail="Payment could not be verified.")
+    # Replay protection: return the original appointment instead of booking again.
+    if idempotency_key:
+        existing = appointment_repository.get_idempotent_appointment(idempotency_key)
+        if existing:
+            logger.info(
+                f"[appointments] Replay of {idempotency_key} -> appointment {existing}"
+            )
+            return {"message": "Appointment already created", "appointment_id": existing}
 
     logger.info(
-        f"[appointments] Creating for patient_id={patient_id} "
-        f"doctor_id={req.doctor_id} payment_id={req.payment_id}"
+        f"[appointments] Creating for patient_id={patient_id} doctor_id={req.doctor_id}"
     )
     try:
         appointment_id = appointment_repository.create_appointment(
@@ -52,9 +53,7 @@ def create_appointment(
             doctor_id=req.doctor_id,
             slot_id=req.slot_id,
             reason=req.reason,
-            payment_id=req.payment_id,
         )
-        return {"message": "Appointment created", "appointment_id": appointment_id}
     except Exception as e:
         # The procedure raises a specific message when the slot was taken
         # between discovery and booking; surface it as a conflict, not a 500.
@@ -63,3 +62,10 @@ def create_appointment(
             raise HTTPException(status_code=409, detail="That slot was just taken.")
         logger.error(f"[appointments] Creation failed: {e}")
         raise HTTPException(status_code=500, detail="Could not create appointment")
+
+    if idempotency_key:
+        appointment_repository.record_idempotency_key(
+            idempotency_key, user_id, appointment_id
+        )
+
+    return {"message": "Appointment created", "appointment_id": appointment_id}
